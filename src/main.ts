@@ -2755,7 +2755,7 @@ function createNurseryView(): HTMLElement {
   } else if (nurserySubTab === "tree") {
     // 2. BRANCHING FAMILY TREE TAB
     const treeContainer = document.createElement("div");
-    treeContainer.className = "bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-hidden min-h-[450px]";
+    treeContainer.className = "bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-x-auto overflow-y-auto min-h-[500px]";
 
     // Connections SVG overlay (underneath row contents)
     const svgConnections = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -2800,189 +2800,300 @@ function createNurseryView(): HTMLElement {
       treeContainer.innerHTML = `<p class="text-center text-slate-500 py-12">No lineage members recorded.</p>`;
     } else {
       const rowsBox = document.createElement("div");
-      rowsBox.className = "space-y-16 relative z-10 flex flex-col";
+      rowsBox.className = "space-y-24 relative z-10 flex flex-col w-max min-w-full p-8";
 
       generations.forEach(gen => {
-        const row = document.createElement("div");
-        row.className = "flex flex-wrap justify-center gap-6 py-2 border-b border-slate-800/30 last:border-b-0";
+        const tier = document.createElement("div");
+        tier.className = "flex flex-col items-center border-b border-slate-800/30 last:border-b-0 pb-8 last:pb-0";
 
         const rowLabel = document.createElement("div");
-        rowLabel.className = "w-full text-center text-[10px] font-black uppercase text-pink-400/60 tracking-widest mb-1";
+        rowLabel.className = "text-center text-[11px] font-black uppercase text-pink-400/80 tracking-widest mb-4 sticky left-8 w-max";
         rowLabel.innerText = `Generation ${gen}`;
-        row.appendChild(rowLabel);
+        tier.appendChild(rowLabel);
 
-        // Group couples side-by-side on the row
-        const sortedRowChars: Character[] = [];
-        const visitedIds = new Set<string>();
+        const row = document.createElement("div");
+        row.className = "flex flex-nowrap items-center justify-center gap-16 md:gap-24 py-2";
+        tier.appendChild(row);
+
         const charsInRow = genMap[gen];
 
-        charsInRow.forEach(char => {
-          if (visitedIds.has(char.id)) return;
+        // Build partnership graph for characters in this generation row
+        const adj: Record<string, Set<string>> = {};
+        charsInRow.forEach(c => adj[c.id] = new Set());
 
-          // Find if this character has offspring with anyone else in this same row
-          let spouse: Character | null = null;
-          allChars.forEach(o => {
-            if (o.parentIds && o.parentIds.includes(char.id)) {
-              const otherParentId = o.parentIds.find(pid => pid !== char.id);
-              if (otherParentId) {
-                const foundSpouse = charsInRow.find(x => x.id === otherParentId);
-                if (foundSpouse && !visitedIds.has(foundSpouse.id)) {
-                  spouse = foundSpouse;
-                }
+        allChars.forEach(o => {
+          if (o.parentIds && o.parentIds.length === 2) {
+            const [p1, p2] = o.parentIds;
+            if (adj[p1] && adj[p2]) {
+              adj[p1].add(p2);
+              adj[p2].add(p1);
+            }
+          }
+        });
+
+        // Connected components (Partner Clusters)
+        const visited = new Set<string>();
+        const clusters: Character[][] = [];
+
+        // First, extract partner groups
+        charsInRow.forEach(c => {
+          if (visited.has(c.id) || adj[c.id].size === 0) return;
+
+          const component: string[] = [];
+          const dfs = (nodeId: string) => {
+            visited.add(nodeId);
+            component.push(nodeId);
+            const neighbors = Array.from(adj[nodeId]).sort((a, b) => adj[a].size - adj[b].size);
+            neighbors.forEach(nbr => {
+              if (!visited.has(nbr)) {
+                dfs(nbr);
               }
-            }
-          });
+            });
+          };
 
-          sortedRowChars.push(char);
-          visitedIds.add(char.id);
-          if (spouse) {
-            sortedRowChars.push(spouse);
-            visitedIds.add((spouse as Character).id);
+          // Try to start from an endpoint of the partnership graph (degree 1)
+          let startId = c.id;
+          const nodesInComp = [c.id];
+          const tempVisited = new Set<string>([c.id]);
+          const queue = [c.id];
+          while (queue.length > 0) {
+            const curr = queue.shift()!;
+            adj[curr].forEach(nbr => {
+              if (!tempVisited.has(nbr)) {
+                tempVisited.add(nbr);
+                nodesInComp.push(nbr);
+                queue.push(nbr);
+              }
+            });
+          }
+
+          const deg1 = nodesInComp.find(nid => adj[nid].size === 1);
+          if (deg1) {
+            startId = deg1;
+          }
+
+          dfs(startId);
+
+          const clusterChars = component.map(id => charsInRow.find(x => x.id === id)!);
+          clusters.push(clusterChars);
+        });
+
+        // Next, group single characters
+        const singleChars = charsInRow.filter(c => adj[c.id].size === 0);
+        const siblingGroups: Record<string, Character[]> = {};
+
+        singleChars.forEach(c => {
+          const pKey = c.parentIds ? [...c.parentIds].sort().join("___") : "none";
+          if (!siblingGroups[pKey]) {
+            siblingGroups[pKey] = [];
+          }
+          siblingGroups[pKey].push(c);
+        });
+
+        Object.entries(siblingGroups).forEach(([pKey, sList]) => {
+          if (pKey === "none") {
+            sList.forEach(sc => {
+              clusters.push([sc]);
+            });
+          } else {
+            clusters.push(sList);
           }
         });
 
-        sortedRowChars.forEach(c => {
-          const card = document.createElement("div");
-          card.setAttribute("data-id", c.id);
-          card.className = "tree-node-card bg-slate-800/90 hover:bg-slate-800 border border-slate-700 rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer shadow-md select-none max-w-xs";
-          if (c.id === "player") {
-            card.classList.add("ring-2", "ring-amber-500", "border-amber-400");
-          }
+        // Create the layout for each cluster in the row
+        clusters.forEach(cluster => {
+          const clusterDiv = document.createElement("div");
+          clusterDiv.className = "flex flex-nowrap gap-4 items-center justify-center";
 
-          card.addEventListener("click", () => {
-            if (c.origin === "offspring") {
-              detailedChildId = c.id;
-            } else {
-              selectedNpcId = c.id;
-              activeView = "npc-detail";
+          cluster.forEach(c => {
+            const card = document.createElement("div");
+            card.setAttribute("data-id", c.id);
+            card.className = "tree-node-card bg-slate-800/90 hover:bg-slate-800 border border-slate-700 rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer shadow-md select-none max-w-xs";
+            if (c.id === "player") {
+              card.classList.add("ring-2", "ring-amber-500", "border-amber-400");
             }
-            renderApp();
+
+            card.addEventListener("click", () => {
+              if (c.origin === "offspring") {
+                detailedChildId = c.id;
+              } else {
+                selectedNpcId = c.id;
+                activeView = "npc-detail";
+              }
+              renderApp();
+            });
+
+            // Card Hover Path Highlighting registration
+            card.addEventListener("mouseenter", () => {
+              if (typeof (window as any).drawTreeConnections === "function") {
+                (window as any).drawTreeConnections(c.id);
+              }
+            });
+            card.addEventListener("mouseleave", () => {
+              if (typeof (window as any).drawTreeConnections === "function") {
+                (window as any).drawTreeConnections(null);
+              }
+            });
+
+            // Small 45px portrait
+            const av = document.createElement("div");
+            av.className = "flex-shrink-0";
+            av.innerHTML = renderCharacter(c, 45, "portrait");
+            card.appendChild(av);
+
+            const textEl = document.createElement("div");
+            textEl.className = "text-left min-w-0";
+
+            const ageVal = c.age ?? 3;
+            const stageLabel = getAgeStageLabel(ageVal);
+            const stageColor = stageLabel === "Youth" ? "text-cyan-400" : stageLabel === "Prime" ? "text-emerald-400" : "text-amber-500";
+
+            textEl.innerHTML = `
+              <div class="font-extrabold text-slate-100 text-xs truncate flex items-center gap-1">${c.id === "player" ? "👑 " : ""}${c.name}</div>
+              <p class="text-[9px] text-slate-400 mt-0.5">${c.species} • <span class="${stageColor} font-bold">${stageLabel}</span></p>
+            `;
+            card.appendChild(textEl);
+            clusterDiv.appendChild(card);
           });
 
-          // Small 45px portrait
-          const av = document.createElement("div");
-          av.className = "flex-shrink-0";
-          av.innerHTML = renderCharacter(c, 45, "portrait");
-          card.appendChild(av);
-
-          const textEl = document.createElement("div");
-          textEl.className = "text-left min-w-0";
-
-          const ageVal = c.age ?? 3;
-          const stageLabel = getAgeStageLabel(ageVal);
-          const stageColor = stageLabel === "Youth" ? "text-cyan-400" : stageLabel === "Prime" ? "text-emerald-400" : "text-amber-500";
-
-          textEl.innerHTML = `
-            <div class="font-extrabold text-slate-100 text-xs truncate flex items-center gap-1">${c.id === "player" ? "👑 " : ""}${c.name}</div>
-            <p class="text-[9px] text-slate-400 mt-0.5">${c.species} • <span class="${stageColor} font-bold">${stageLabel}</span></p>
-          `;
-          card.appendChild(textEl);
-          row.appendChild(card);
+          row.appendChild(clusterDiv);
         });
 
-        rowsBox.appendChild(row);
+        rowsBox.appendChild(tier);
       });
 
       treeContainer.appendChild(rowsBox);
 
       // SVG dynamic connection drawing with centered horizontal partner routing
       setTimeout(() => {
-        const svg = document.getElementById("tree-svg-connections") as SVGSVGElement | null;
-        if (!svg) return;
-        svg.innerHTML = ""; // clear previous connections
+        let currentHoveredId: string | null = null;
 
-        // Size SVG canvas to match full scrollable area
-        svg.setAttribute("width", treeContainer.scrollWidth.toString());
-        svg.setAttribute("height", treeContainer.scrollHeight.toString());
+        const drawConnections = (hoveredId: string | null) => {
+          currentHoveredId = hoveredId;
+          const svg = document.getElementById("tree-svg-connections") as SVGSVGElement | null;
+          if (!svg) return;
+          svg.innerHTML = ""; // clear previous connections
 
-        const containerRect = treeContainer.getBoundingClientRect();
-        const scrollLeft = treeContainer.scrollLeft;
-        const scrollTop = treeContainer.scrollTop;
+          // Size SVG canvas to match full scrollable area
+          svg.setAttribute("width", treeContainer.scrollWidth.toString());
+          svg.setAttribute("height", treeContainer.scrollHeight.toString());
 
-        const processedPairs = new Set<string>();
+          const containerRect = treeContainer.getBoundingClientRect();
+          const scrollLeft = treeContainer.scrollLeft;
+          const scrollTop = treeContainer.scrollTop;
 
-        allChars.forEach(child => {
-          if (!child.parentIds) return;
-          if (!treeMemberIds.has(child.id)) return;
+          const processedPairs = new Set<string>();
 
-          const childCard = treeContainer.querySelector(`[data-id="${child.id}"].tree-node-card`);
-          if (!childCard) return;
+          allChars.forEach(child => {
+            if (!child.parentIds) return;
+            if (!treeMemberIds.has(child.id)) return;
 
-          const childRect = childCard.getBoundingClientRect();
-          const childX = childRect.left + childRect.width / 2 - containerRect.left + scrollLeft;
-          const childY = childRect.top - containerRect.top + scrollTop;
+            const childCard = treeContainer.querySelector(`[data-id="${child.id}"].tree-node-card`);
+            if (!childCard) return;
 
-          const parentIds = child.parentIds.filter(pid => treeMemberIds.has(pid));
+            const childRect = childCard.getBoundingClientRect();
+            const childX = childRect.left + childRect.width / 2 - containerRect.left + scrollLeft;
+            const childY = childRect.top - containerRect.top + scrollTop;
 
-          if (parentIds.length === 2) {
-            const [pAId, pBId] = parentIds;
-            const pACard = treeContainer.querySelector(`[data-id="${pAId}"].tree-node-card`);
-            const pBCard = treeContainer.querySelector(`[data-id="${pBId}"].tree-node-card`);
+            const parentIds = child.parentIds.filter(pid => treeMemberIds.has(pid));
 
-            if (pACard && pBCard) {
-              const pARect = pACard.getBoundingClientRect();
-              const pBRect = pBCard.getBoundingClientRect();
+            if (parentIds.length === 2) {
+              const [pAId, pBId] = parentIds;
+              const pACard = treeContainer.querySelector(`[data-id="${pAId}"].tree-node-card`);
+              const pBCard = treeContainer.querySelector(`[data-id="${pBId}"].tree-node-card`);
 
-              const pAX = pARect.left + pARect.width / 2 - containerRect.left + scrollLeft;
-              const pAY_bottom = pARect.top + pARect.height - containerRect.top + scrollTop;
+              if (pACard && pBCard) {
+                const pARect = pACard.getBoundingClientRect();
+                const pBRect = pBCard.getBoundingClientRect();
 
-              const pBX = pBRect.left + pBRect.width / 2 - containerRect.left + scrollLeft;
-              const pBY_bottom = pBRect.top + pBRect.height - containerRect.top + scrollTop;
+                const pAX = pARect.left + pARect.width / 2 - containerRect.left + scrollLeft;
+                const pAY_bottom = pARect.top + pARect.height - containerRect.top + scrollTop;
 
-              const bottomY = (pAY_bottom + pBY_bottom) / 2;
-              const midX = (pAX + pBX) / 2;
-              const midY = bottomY;
+                const pBX = pBRect.left + pBRect.width / 2 - containerRect.left + scrollLeft;
+                const pBY_bottom = pBRect.top + pBRect.height - containerRect.top + scrollTop;
 
-              const pairKey = [pAId, pBId].sort().join("___");
-              if (!processedPairs.has(pairKey)) {
-                processedPairs.add(pairKey);
+                const bottomY = (pAY_bottom + pBY_bottom) / 2;
+                const midX = (pAX + pBX) / 2;
+                const midY = bottomY;
 
-                // Draw horizontal line connecting partners
-                const hLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                hLine.setAttribute("x1", pAX.toString());
-                hLine.setAttribute("y1", bottomY.toString());
-                hLine.setAttribute("x2", pBX.toString());
-                hLine.setAttribute("y2", bottomY.toString());
-                hLine.setAttribute("stroke", "#f43f5e");
-                hLine.setAttribute("stroke-width", "3");
-                hLine.setAttribute("stroke-opacity", "0.80");
-                svg.appendChild(hLine);
+                const midWayY = (midY + childY) / 2;
+
+                // Determine highlight states
+                const isChildHovered = hoveredId === child.id;
+                const isParentAHovered = hoveredId === pAId;
+                const isParentBHovered = hoveredId === pBId;
+                const isHighlighted = hoveredId !== null && (isChildHovered || isParentAHovered || isParentBHovered);
+
+                const strokeColor = isHighlighted ? "#fbbf24" : "#f43f5e";
+                const opacity = hoveredId === null ? 0.70 : (isHighlighted ? 1.0 : 0.15);
+                const strokeWidth = isHighlighted ? 4.5 : 2.5;
+
+                const pairKey = [pAId, pBId].sort().join("___");
+                if (!processedPairs.has(pairKey)) {
+                  processedPairs.add(pairKey);
+
+                  // Draw horizontal line connecting partners
+                  const hLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                  hLine.setAttribute("x1", pAX.toString());
+                  hLine.setAttribute("y1", bottomY.toString());
+                  hLine.setAttribute("x2", pBX.toString());
+                  hLine.setAttribute("y2", bottomY.toString());
+                  hLine.setAttribute("stroke", strokeColor);
+                  hLine.setAttribute("stroke-width", (isHighlighted ? 5.0 : 3.0).toString());
+                  hLine.setAttribute("stroke-opacity", opacity.toString());
+                  svg.appendChild(hLine);
+                }
+
+                // Route descendant line downwards from center point (midX, midY) of the horizontal line
+                // Orthogonal "Elbow" routing: midX,midY -> midX,midWayY -> childX,midWayY -> childX,childY
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                const d = `M ${midX} ${midY} L ${midX} ${midWayY} L ${childX} ${midWayY} L ${childX} ${childY}`;
+                path.setAttribute("d", d);
+                path.setAttribute("stroke", strokeColor);
+                path.setAttribute("stroke-width", strokeWidth.toString());
+                path.setAttribute("stroke-opacity", opacity.toString());
+                path.setAttribute("fill", "none");
+                svg.appendChild(path);
+                return;
               }
+            }
 
-              // Route descendant line downwards from center point (midX, midY) of the horizontal line
+            // Fallback if 1 parent or cards missing
+            parentIds.forEach(parentId => {
+              const parentCard = treeContainer.querySelector(`[data-id="${parentId}"].tree-node-card`);
+              if (!parentCard) return;
+
+              const parentRect = parentCard.getBoundingClientRect();
+              const parentX = parentRect.left + parentRect.width / 2 - containerRect.left + scrollLeft;
+              const parentY = parentRect.top + parentRect.height - containerRect.top + scrollTop;
+
+              const midWayY = (parentY + childY) / 2;
+
+              const isChildHovered = hoveredId === child.id;
+              const isParentHovered = hoveredId === parentId;
+              const isHighlighted = hoveredId !== null && (isChildHovered || isParentHovered);
+
+              const strokeColor = isHighlighted ? "#fbbf24" : "#f43f5e";
+              const opacity = hoveredId === null ? 0.60 : (isHighlighted ? 1.0 : 0.15);
+              const strokeWidth = isHighlighted ? 4.5 : 2.5;
+
               const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-              const midWayY = (midY + childY) / 2;
-              const d = `M ${midX} ${midY} C ${midX} ${midWayY}, ${childX} ${midWayY}, ${childX} ${childY}`;
+              const d = `M ${parentX} ${parentY} L ${parentX} ${midWayY} L ${childX} ${midWayY} L ${childX} ${childY}`;
               path.setAttribute("d", d);
-              path.setAttribute("stroke", "#f43f5e");
-              path.setAttribute("stroke-width", "2.5");
-              path.setAttribute("stroke-opacity", "0.65");
+              path.setAttribute("stroke", strokeColor);
+              path.setAttribute("stroke-width", strokeWidth.toString());
+              path.setAttribute("stroke-opacity", opacity.toString());
               path.setAttribute("fill", "none");
               svg.appendChild(path);
-              return;
-            }
-          }
-
-          // Fallback if 1 parent or cards missing
-          parentIds.forEach(parentId => {
-            const parentCard = treeContainer.querySelector(`[data-id="${parentId}"].tree-node-card`);
-            if (!parentCard) return;
-
-            const parentRect = parentCard.getBoundingClientRect();
-            const parentX = parentRect.left + parentRect.width / 2 - containerRect.left + scrollLeft;
-            const parentY = parentRect.top + parentRect.height - containerRect.top + scrollTop;
-
-            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            const midY = (parentY + childY) / 2;
-            const d = `M ${parentX} ${parentY} C ${parentX} ${midY}, ${childX} ${midY}, ${childX} ${childY}`;
-            path.setAttribute("d", d);
-            path.setAttribute("stroke", "#f43f5e");
-            path.setAttribute("stroke-width", "2.5");
-            path.setAttribute("stroke-opacity", "0.55");
-            path.setAttribute("fill", "none");
-            svg.appendChild(path);
+            });
           });
-        });
+        };
+
+        (window as any).drawTreeConnections = drawConnections;
+        (window as any).redrawTreeConnections = () => drawConnections(currentHoveredId);
+
+        // Initial draw
+        drawConnections(null);
       }, 100);
     }
 
@@ -3474,6 +3585,20 @@ function createExpeditionsView(): HTMLElement {
   container.appendChild(grid);
 
   return container;
+}
+
+// Debounced tree connections resize redraw listener
+if (!(window as any).hasTreeResizeListener) {
+  (window as any).hasTreeResizeListener = true;
+  let resizeTimeout: any = null;
+  window.addEventListener("resize", () => {
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      if (typeof (window as any).redrawTreeConnections === "function") {
+        (window as any).redrawTreeConnections();
+      }
+    }, 100);
+  });
 }
 
 renderApp();
