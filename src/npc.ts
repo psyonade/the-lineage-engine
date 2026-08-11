@@ -104,6 +104,13 @@ export function generateNPC(archetype: ArchetypeTemplate): Character {
   const species = archetype.speciesDefault;
   const name = generateFantasyName(species);
 
+  // Rare mutation for legendary trait
+  const legendaryTraits: string[] = [];
+  if (Math.random() < 0.03) {
+    const pool = ["Moonlight Grace", "Hellfire Brand", "Iron Will"];
+    legendaryTraits.push(pool[Math.floor(Math.random() * pool.length)]);
+  }
+
   // Generate HSL color palettes matching species defaults
   let skinH = 25;
   let skinS = 40;
@@ -232,7 +239,11 @@ export function generateNPC(archetype: ArchetypeTemplate): Character {
       chaos: randomInBand(archetype.personalityBase.chaos)
     },
     background: `${archetype.name}: ${archetype.flavorText}`,
-    origin: "generated"
+    origin: "generated",
+    age: 3, // starts at Prime
+    generation: 1,
+    legendaryTraits,
+    carriedTraits: []
   };
 }
 
@@ -278,7 +289,11 @@ export const UNIQUE_NPCS: Character[] = [
     background: "★ Storied Ranger: Guardian of the twilight forest trail. Calm, focused, and deeply devoted to nature.",
     origin: "generated",
     isUnique: true,
-    questStage: 0
+    questStage: 0,
+    age: 3, // starts in Prime
+    generation: 1,
+    legendaryTraits: ["Moonlight Grace"],
+    carriedTraits: []
   },
   {
     id: "npc-ignatius",
@@ -318,7 +333,11 @@ export const UNIQUE_NPCS: Character[] = [
     background: "★ Storied Mage: Relentless scholar tracking long-lost forbidden artifacts. Fascinated by ancient spells.",
     origin: "generated",
     isUnique: true,
-    questStage: 0
+    questStage: 0,
+    age: 3, // starts in Prime
+    generation: 1,
+    legendaryTraits: ["Hellfire Brand"],
+    carriedTraits: []
   },
   {
     id: "npc-brenda",
@@ -358,6 +377,10 @@ export const UNIQUE_NPCS: Character[] = [
     background: "★ Storied Blacksmith: An iron-willed dwarven metal-forger with a fiery passion and unmatched work ethic.",
     origin: "generated",
     isUnique: true,
-    questStage: 0
+    questStage: 0,
+    age: 3, // starts in Prime
+    generation: 1,
+    legendaryTraits: ["Iron Will"],
+    carriedTraits: []
   }
 ];

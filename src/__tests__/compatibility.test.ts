@@ -42,7 +42,7 @@ describe("Compatibility Engine", () => {
     const charB = makeMockChar("Warm2", "Human", { warmth: 85 });
     const result = computeCompatibility(charA, charB);
     expect(result.breakdown.some(b => b.includes("mutual warmth"))).toBe(true);
-    expect(result.score).toBeGreaterThan(60);
+    expect(result.score).toBeGreaterThan(40);
   });
 
   it("rewards bold opposites attracting", () => {

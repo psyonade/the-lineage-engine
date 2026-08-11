@@ -22,6 +22,49 @@ export function hslToHex(h: number, s: number, l: number): string {
 }
 
 /**
+ * Check eligibility of two characters for pairing (Prime age, incest check).
+ */
+export function checkPairingEligibility(charA: Character, charB: Character): { eligible: boolean; reason?: string } {
+  if (charA.id === charB.id) {
+    return { eligible: false, reason: "A character cannot be paired with themselves." };
+  }
+
+  // Age checks
+  const ageA = charA.age ?? 3;
+  const ageB = charB.age ?? 3;
+  if (ageA < 3 || ageA > 8) {
+    return { eligible: false, reason: `${charA.name} is not in their Prime breeding age (current age: ${ageA} seasons, stage: ${ageA < 3 ? "Youth" : "Elder"}).` };
+  }
+  if (ageB < 3 || ageB > 8) {
+    return { eligible: false, reason: `${charB.name} is not in their Prime breeding age (current age: ${ageB} seasons, stage: ${ageB < 3 ? "Youth" : "Elder"}).` };
+  }
+
+  // Parent-child restriction
+  if (charA.parentIds) {
+    if (charA.parentIds.includes(charB.id)) {
+      return { eligible: false, reason: "Direct parent-child pairings are forbidden." };
+    }
+  }
+  if (charB.parentIds) {
+    if (charB.parentIds.includes(charA.id)) {
+      return { eligible: false, reason: "Direct parent-child pairings are forbidden." };
+    }
+  }
+
+  // Sibling restriction (share the same parents)
+  if (charA.parentIds && charB.parentIds) {
+    const [pA1, pA2] = charA.parentIds;
+    const [pB1, pB2] = charB.parentIds;
+    const shareBoth = (pA1 === pB1 && pA2 === pB2) || (pA1 === pB2 && pA2 === pB1);
+    if (shareBoth) {
+      return { eligible: false, reason: "Full-sibling pairings are forbidden." };
+    }
+  }
+
+  return { eligible: true };
+}
+
+/**
  * Blend two hues. Hue wraps around 360, so we blend along the shortest arc.
  */
 export function blendHue(h1: number, h2: number): number {
@@ -254,9 +297,53 @@ export function generateOffspring(parentA: Character, parentB: Character): Chara
   const ambition = inheritPersonality(parentA.personalityTraits.ambition, parentB.personalityTraits.ambition);
   const chaos = inheritPersonality(parentA.personalityTraits.chaos, parentB.personalityTraits.chaos);
 
+  // 4. LEGENDARY & RECESSIVE TRAIT RECURRENCE
+  const allParentLegendary = new Set<string>();
+  if (parentA.legendaryTraits) parentA.legendaryTraits.forEach(t => allParentLegendary.add(t));
+  if (parentA.carriedTraits) parentA.carriedTraits.forEach(t => allParentLegendary.add(t));
+  if (parentB.legendaryTraits) parentB.legendaryTraits.forEach(t => allParentLegendary.add(t));
+  if (parentB.carriedTraits) parentB.carriedTraits.forEach(t => allParentLegendary.add(t));
+
+  const legendaryTraits: string[] = [];
+  const carriedTraits: string[] = [];
+
+  allParentLegendary.forEach(trait => {
+    const parentAHas = (parentA.legendaryTraits?.includes(trait)) || (parentA.carriedTraits?.includes(trait));
+    const parentBHas = (parentB.legendaryTraits?.includes(trait)) || (parentB.carriedTraits?.includes(trait));
+
+    if (parentAHas && parentBHas) {
+      // Both parents carry/express: 80% chance of expression, 20% chance of recessive carrying
+      if (Math.random() < 0.80) {
+        legendaryTraits.push(trait);
+      } else {
+        carriedTraits.push(trait);
+      }
+    } else {
+      // Only one parent has it: 40% chance of expression, 40% chance of recessive carrying
+      const r = Math.random();
+      if (r < 0.40) {
+        legendaryTraits.push(trait);
+      } else if (r < 0.80) {
+        carriedTraits.push(trait);
+      }
+    }
+  });
+
+  // Very rare mutation (2% chance for completely new legendary trait if none inherited)
+  if (legendaryTraits.length === 0 && carriedTraits.length === 0 && Math.random() < 0.02) {
+    const legendaryPool = ["Moonlight Grace", "Hellfire Brand", "Iron Will"];
+    const mutatedTrait = legendaryPool[Math.floor(Math.random() * legendaryPool.length)];
+    legendaryTraits.push(mutatedTrait);
+  }
+
   // Background/Flavor
   const name = generateFantasyName(species);
-  const background = `The offspring of ${parentA.name} and ${parentB.name}. Inherited a blended ${species} heritage, with parentage traits and completely unique fashion styling.`;
+  let background = `The offspring of ${parentA.name} and ${parentB.name}. Inherited a blended ${species} heritage, with parentage traits and completely unique fashion styling.`;
+  if (legendaryTraits.length > 0) {
+    background += ` Bears the legendary lineage trait: ${legendaryTraits.join(", ")}!`;
+  }
+
+  const generation = Math.max(parentA.generation || 1, parentB.generation || 1) + 1;
 
   return {
     id: uuid(),
@@ -275,6 +362,10 @@ export function generateOffspring(parentA: Character, parentB: Character): Chara
     background,
     origin: "offspring",
     parentIds: [parentA.id, parentB.id],
-    parentNames: [parentA.name, parentB.name]
+    parentNames: [parentA.name, parentB.name],
+    age: 0, // Newborns start at age 0 (Youth)
+    generation,
+    legendaryTraits,
+    carriedTraits
   };
 }
