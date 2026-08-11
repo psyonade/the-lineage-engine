@@ -5,7 +5,7 @@ import { ARCHETYPES, UNIQUE_NPCS, generateNPC } from "./npc";
 import { renderCharacter } from "./renderer";
 import { computeCompatibility } from "./compatibility";
 import { DIALOGUE_SCENES, getRelationshipStage, applyCompatibilityModifiers, getRelationshipPath } from "./dialogue";
-import { generateOffspring, checkPairingEligibility } from "./genetics";
+import { generateOffspring, checkPairingEligibility, isRestrictedFamily, generateFantasyName } from "./genetics";
 
 // Initial state
 let state: SaveState = loadGame();
@@ -28,6 +28,16 @@ state.offspring.forEach(c => {
   if (c.age === undefined) c.age = 0;
   if (c.generation === undefined) c.generation = 2;
 });
+
+function isPartnered(char: Character): boolean {
+  if (char.partnerId) return true;
+  if (char.id === "player") {
+    return Object.values(state.relationships).some(r => r.stage === "Partner");
+  } else {
+    const rel = state.relationships[char.id];
+    return rel ? rel.stage === "Partner" : false;
+  }
+}
 
 function performSuccession(successor: Character) {
   if (!state.player) return;
@@ -227,8 +237,9 @@ function triggerRandomHubEvent() {
       ]
     };
   } else if (eventIdx === 1) {
-    // 2. Jealousy Spark
-    const highAff = npcsWithRel.filter(n => state.relationships[n.id].stats.affection >= 45);
+    // 2. Jealousy Spark (exclude restricted family from romantic candidates)
+    const romanticCandidates = npcsWithRel.filter(n => !isRestrictedFamily(state.player!, n));
+    const highAff = romanticCandidates.filter(n => state.relationships[n.id].stats.affection >= 45);
     if (highAff.length < 2) {
       triggerFeastEvent(npcsWithRel);
       return;
@@ -892,19 +903,129 @@ function createCreatorView(): HTMLElement {
   const form = document.createElement("div");
   form.className = "space-y-4";
 
-  // Name
+  // Name & Randomize Avatar Button
   const nameLabel = document.createElement("label");
   nameLabel.className = "block text-sm font-semibold text-slate-300";
   nameLabel.innerText = "Character Name";
+
+  const nameRow = document.createElement("div");
+  nameRow.className = "flex gap-2 items-center mt-1";
+
   const nameInput = document.createElement("input");
   nameInput.type = "text";
-  nameInput.className = "w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 mt-1";
+  nameInput.className = "flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-500";
   nameInput.value = creatorForm.name;
   nameInput.addEventListener("input", (e) => {
     creatorForm.name = (e.target as HTMLInputElement).value;
     updatePreview();
   });
-  nameLabel.appendChild(nameInput);
+
+  const randBtn = document.createElement("button");
+  randBtn.type = "button";
+  randBtn.className = "px-4 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-extrabold rounded-lg shadow transition-all text-xs whitespace-nowrap cursor-pointer";
+  randBtn.innerText = "🎲 Randomize Avatar";
+
+  randBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+
+    // 1. Randomize species and gender
+    const speciesList: GameSpecies[] = ["Human", "Elf", "Dwarf", "Halfling", "Gnome", "Half-Elf", "Half-Orc", "Orc", "Tiefling", "Dragonborn", "Beastfolk"];
+    const randomSpecies = speciesList[Math.floor(Math.random() * speciesList.length)];
+    creatorForm.species = randomSpecies;
+
+    const genderList: GameGender[] = ["Female", "Male", "Non-binary"];
+    creatorForm.gender = genderList[Math.floor(Math.random() * genderList.length)];
+
+    // 2. Randomize genetic traits
+    const builds: Array<Character["geneticTraits"]["build"]> = ["slender", "average", "muscular", "stocky"];
+    creatorForm.build = builds[Math.floor(Math.random() * builds.length)];
+
+    // Set height based on species
+    if (randomSpecies === "Halfling" || randomSpecies === "Gnome") {
+      creatorForm.height = Math.floor(Math.random() * 16) + 100; // 100 - 115
+    } else if (randomSpecies === "Elf" || randomSpecies === "Dragonborn" || randomSpecies === "Tiefling") {
+      creatorForm.height = Math.floor(Math.random() * 21) + 185; // 185 - 205
+    } else if (randomSpecies === "Dwarf") {
+      creatorForm.height = Math.floor(Math.random() * 16) + 135; // 135 - 150
+    } else {
+      creatorForm.height = Math.floor(Math.random() * 31) + 155; // 155 - 185
+    }
+
+    creatorForm.faceShape = ["oval", "round", "sharp", "square"][Math.floor(Math.random() * 4)];
+    creatorForm.earShape = ["normal", "pointed", "long", "animal", "broad"][Math.floor(Math.random() * 5)];
+    creatorForm.hairTexture = ["straight", "wavy", "curly", "coily", "wild"][Math.floor(Math.random() * 5)];
+    creatorForm.markingsPattern = ["none", "tattoos", "scars", "stripes", "freckles"][Math.floor(Math.random() * 5)];
+
+    // Species features defaults/customizations
+    let speciesFeatures = "none";
+    if (randomSpecies === "Tiefling") speciesFeatures = "horns";
+    else if (randomSpecies === "Dragonborn") speciesFeatures = "tail";
+    else if (randomSpecies === "Beastfolk") speciesFeatures = "fluffy-tail";
+    else speciesFeatures = ["none", "horns", "tail", "wings", "fangs", "fluffy-tail"][Math.floor(Math.random() * 6)];
+    creatorForm.speciesFeatures = speciesFeatures;
+
+    // 3. Randomize Styling traits (only eligible / unlocked ones)
+    creatorForm.hairStyle = ["short", "long", "braids", "curls", "crest", "afro", "mohawk", "bald"][Math.floor(Math.random() * 8)];
+
+    const allAccessories = ["none", "earrings", "glasses", "crown", "circlet", "eyepatch", "collar"];
+    const unlockedAccessories = allAccessories.filter(isItemUnlocked);
+    creatorForm.accessory = unlockedAccessories[Math.floor(Math.random() * unlockedAccessories.length)];
+
+    const allClothing = ["commoner-robe", "knight-armor", "mage-cloak", "bard-tunic", "rogue-leather", "baker-apron"];
+    const unlockedClothing = allClothing.filter(isItemUnlocked);
+    creatorForm.clothing = unlockedClothing[Math.floor(Math.random() * unlockedClothing.length)];
+
+    // 4. Color logic with 5% wild mutation chance
+    if (Math.random() < 0.05) {
+      // Wild mutation
+      creatorForm.skinToneHue = Math.floor(Math.random() * 360);
+      creatorForm.skinToneSat = Math.floor(Math.random() * 41) + 40; // 40-80
+      creatorForm.skinToneLight = Math.floor(Math.random() * 41) + 30; // 30-70
+
+      creatorForm.hairColorHue = Math.floor(Math.random() * 360);
+      creatorForm.hairColorSat = Math.floor(Math.random() * 41) + 40;
+      creatorForm.hairColorLight = Math.floor(Math.random() * 41) + 20; // 20-60
+
+      creatorForm.eyeColorHue = Math.floor(Math.random() * 360);
+      creatorForm.eyeColorSat = Math.floor(Math.random() * 41) + 40;
+      creatorForm.eyeColorLight = Math.floor(Math.random() * 31) + 40; // 40-70
+    } else {
+      // Preset with HSL wobble
+      const preset = SPECIES_PRESETS[randomSpecies];
+      const wobble = (val: number, range: number, min: number, max: number) => {
+        return Math.max(min, Math.min(max, Math.round(val + (Math.random() * range - range / 2))));
+      };
+      creatorForm.skinToneHue = Math.round((preset.skin[0] + (Math.random() * 21 - 10) + 360) % 360);
+      creatorForm.skinToneSat = wobble(preset.skin[1], 14, 10, 100);
+      creatorForm.skinToneLight = wobble(preset.skin[2], 14, 10, 95);
+
+      creatorForm.hairColorHue = Math.round((preset.hair[0] + (Math.random() * 21 - 10) + 360) % 360);
+      creatorForm.hairColorSat = wobble(preset.hair[1], 14, 10, 100);
+      creatorForm.hairColorLight = wobble(preset.hair[2], 14, 10, 95);
+
+      creatorForm.eyeColorHue = Math.round((preset.eye[0] + (Math.random() * 21 - 10) + 360) % 360);
+      creatorForm.eyeColorSat = wobble(preset.eye[1], 14, 10, 100);
+      creatorForm.eyeColorLight = wobble(preset.eye[2], 14, 10, 95);
+    }
+
+    // 5. Randomize background (only unlocked ones)
+    const allBgs = Object.keys(BACKGROUNDS_MAP);
+    const unlockedBgs = allBgs.filter(isBackgroundUnlocked);
+    const randBg = unlockedBgs[Math.floor(Math.random() * unlockedBgs.length)];
+    creatorForm.background = randBg;
+    creatorForm.personality = { ...BACKGROUNDS_MAP[randBg].stats };
+
+    // 6. Name generation
+    creatorForm.name = generateFantasyName(randomSpecies);
+
+    // Re-render and update preview immediately
+    renderApp();
+    updatePreview();
+  });
+
+  nameRow.appendChild(nameInput);
+  nameRow.appendChild(randBtn);
+  nameLabel.appendChild(nameRow);
   form.appendChild(nameLabel);
 
   // Gender Identity Select
@@ -1533,13 +1654,80 @@ function createHubView(): HTMLElement {
     state.npcs.forEach(n => n.age = (n.age ?? 3) + 1);
     state.offspring.forEach(c => c.age = (c.age ?? 0) + 1);
 
+    const summaryLines: string[] = [];
+
+    // 1. Autonomous NPC Partnerships (10% chance)
+    // Candidates are unpartnered cast NPCs in Prime stage (age 3-8)
+    const eligibleForPartner = state.npcs.concat(state.offspring).filter(c => {
+      const ageVal = c.age ?? 3;
+      return ageVal >= 3 && ageVal <= 8 && !isPartnered(c);
+    });
+
+    if (eligibleForPartner.length >= 2 && Math.random() < 0.10) {
+      // Find a random non-incestuous pair
+      const shuffled = [...eligibleForPartner].sort(() => Math.random() - 0.5);
+      let foundPair: [Character, Character] | null = null;
+      for (let i = 0; i < shuffled.length; i++) {
+        for (let j = i + 1; j < shuffled.length; j++) {
+          if (!isRestrictedFamily(shuffled[i], shuffled[j])) {
+            foundPair = [shuffled[i], shuffled[j]];
+            break;
+          }
+        }
+        if (foundPair) break;
+      }
+
+      if (foundPair) {
+        foundPair[0].partnerId = foundPair[1].id;
+        foundPair[1].partnerId = foundPair[0].id;
+        summaryLines.push(`💞 **${foundPair[0].name}** and **${foundPair[1].name}** have autonomously formed a romantic partnership!`);
+      }
+    }
+
+    // Update pool of unpartnered NPCs for Casual Flings
+    const eligibleForFling = state.npcs.concat(state.offspring).filter(c => {
+      const ageVal = c.age ?? 3;
+      return ageVal >= 3 && ageVal <= 8 && !isPartnered(c);
+    });
+
+    // 2. Autonomous NPC Offspring - Casual Flings (5% chance)
+    if (eligibleForFling.length >= 2 && Math.random() < 0.05) {
+      const shuffled = [...eligibleForFling].sort(() => Math.random() - 0.5);
+      let foundPair: [Character, Character] | null = null;
+      for (let i = 0; i < shuffled.length; i++) {
+        for (let j = i + 1; j < shuffled.length; j++) {
+          if (!isRestrictedFamily(shuffled[i], shuffled[j])) {
+            foundPair = [shuffled[i], shuffled[j]];
+            break;
+          }
+        }
+        if (foundPair) break;
+      }
+
+      if (foundPair) {
+        const child = generateOffspring(foundPair[0], foundPair[1]);
+        state.offspring.push(child);
+        checkAndUnlockAchievements(child);
+        summaryLines.push(`🍼 A casual background fling between **${foundPair[0].name}** and **${foundPair[1].name}** has resulted in a new child: **${child.name}**!`);
+      }
+    }
+
     triggerRandomHubEvent();
 
     saveGame(state);
     renderApp();
-    if (!activeModalEvent) {
-      showToast(`🍂 Time marches on... Advanced to Season ${state.currentSeason}! All characters aged, and 5 Action Points were restored.`);
+
+    // Custom season summary structured toast
+    let summaryHTML = `Advanced to Season **${state.currentSeason}**! All characters aged, and 5 Action Points were restored.<br/>`;
+    if (summaryLines.length > 0) {
+      summaryHTML += `<div class="mt-2 border-t border-slate-700/50 pt-2 space-y-1.5 text-[11px] font-medium text-slate-300">`;
+      summaryLines.forEach(line => {
+        summaryHTML += `<div>• ${line}</div>`;
+      });
+      summaryHTML += `</div>`;
     }
+
+    showToast(summaryHTML, summaryLines.length > 0 ? 6000 : 4000);
   });
   metaControls.appendChild(endSeasonBtn);
 
@@ -1901,9 +2089,9 @@ function createNpcDetailView(): HTMLElement {
         targetScene = DIALOGUE_SCENES[0];
       }
     } else {
-      if (rel.stage === "Interested" || rel.stage === "Partner") {
+      if ((rel.stage === "Interested" || rel.stage === "Partner") && !isRestrictedFamily(state.player!, npc)) {
         targetScene = DIALOGUE_SCENES[2]; // confession
-      } else if (rel.stage === "Acquaintance") {
+      } else if (rel.stage === "Acquaintance" || isRestrictedFamily(state.player!, npc)) {
         targetScene = DIALOGUE_SCENES[1]; // shared quest
       }
     }
@@ -2202,7 +2390,18 @@ function createDialogueView(): HTMLElement {
   choicesBox.className = "space-y-3";
 
   if (node.choices.length > 0) {
-    node.choices.forEach(choice => {
+    let visibleChoices = node.choices;
+    if (isRestrictedFamily(state.player!, npc)) {
+      visibleChoices = node.choices.filter(choice => {
+        const isRomantic = (choice.statDeltas?.attraction && choice.statDeltas.attraction > 0) ||
+                           choice.nextNodeId === "end_romantic" ||
+                           choice.nextNodeId === "end_flirty" ||
+                           choice.nextNodeId === "partnership_accepted";
+        return !isRomantic;
+      });
+    }
+
+    visibleChoices.forEach(choice => {
       const btn = document.createElement("button");
       btn.className = "w-full text-left p-4 bg-slate-700/50 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-600 hover:border-slate-500 font-bold transition-all text-xs md:text-sm flex items-center justify-between gap-4 group";
 
@@ -2564,25 +2763,27 @@ function createNurseryView(): HTMLElement {
     svgConnections.setAttribute("class", "absolute inset-0 pointer-events-none w-full h-full z-0");
     treeContainer.appendChild(svgConnections);
 
-    // Filter tree members to only include past/present PCs and their direct partners/offspring
-    const treePCs = allChars.filter(c => c.id === "player" || c.isPC || c.isFormerPC);
-    const treePCIds = new Set(treePCs.map(c => c.id));
-
-    // Direct offspring of PCs
-    const treeOffspring = allChars.filter(c => c.parentIds && c.parentIds.some(pid => treePCIds.has(pid)));
-    const treeOffspringIds = new Set(treeOffspring.map(c => c.id));
-
-    // Direct parents of PCs (if any PC was born of NPCs)
-    const treeParentIds = new Set<string>();
+    // Build the robust family tree members set (includes past/present PCs, offspring, and both parents)
+    const treeMembersSet = new Set<Character>();
     allChars.forEach(c => {
-      if (treePCIds.has(c.id) && c.parentIds) {
-        c.parentIds.forEach(pid => treeParentIds.add(pid));
+      if (c.id === "player" || c.isPC || c.isFormerPC) {
+        treeMembersSet.add(c);
       }
     });
 
-    const treeMembers = allChars.filter(c => {
-      return treePCIds.has(c.id) || treeOffspringIds.has(c.id) || treeParentIds.has(c.id);
+    allChars.forEach(c => {
+      if (c.parentIds) {
+        treeMembersSet.add(c);
+        c.parentIds.forEach(pid => {
+          const parentChar = allChars.find(x => x.id === pid);
+          if (parentChar) {
+            treeMembersSet.add(parentChar);
+          }
+        });
+      }
     });
+
+    const treeMembers = Array.from(treeMembersSet);
     const treeMemberIds = new Set(treeMembers.map(m => m.id));
 
     // Group characters by generation
@@ -2610,7 +2811,37 @@ function createNurseryView(): HTMLElement {
         rowLabel.innerText = `Generation ${gen}`;
         row.appendChild(rowLabel);
 
-        genMap[gen].forEach(c => {
+        // Group couples side-by-side on the row
+        const sortedRowChars: Character[] = [];
+        const visitedIds = new Set<string>();
+        const charsInRow = genMap[gen];
+
+        charsInRow.forEach(char => {
+          if (visitedIds.has(char.id)) return;
+
+          // Find if this character has offspring with anyone else in this same row
+          let spouse: Character | null = null;
+          allChars.forEach(o => {
+            if (o.parentIds && o.parentIds.includes(char.id)) {
+              const otherParentId = o.parentIds.find(pid => pid !== char.id);
+              if (otherParentId) {
+                const foundSpouse = charsInRow.find(x => x.id === otherParentId);
+                if (foundSpouse && !visitedIds.has(foundSpouse.id)) {
+                  spouse = foundSpouse;
+                }
+              }
+            }
+          });
+
+          sortedRowChars.push(char);
+          visitedIds.add(char.id);
+          if (spouse) {
+            sortedRowChars.push(spouse);
+            visitedIds.add((spouse as Character).id);
+          }
+        });
+
+        sortedRowChars.forEach(c => {
           const card = document.createElement("div");
           card.setAttribute("data-id", c.id);
           card.className = "tree-node-card bg-slate-800/90 hover:bg-slate-800 border border-slate-700 rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer shadow-md select-none max-w-xs";
@@ -2654,7 +2885,7 @@ function createNurseryView(): HTMLElement {
 
       treeContainer.appendChild(rowsBox);
 
-      // SVG dynamic connection drawing
+      // SVG dynamic connection drawing with centered horizontal partner routing
       setTimeout(() => {
         const svg = document.getElementById("tree-svg-connections") as SVGSVGElement | null;
         if (!svg) return;
@@ -2668,9 +2899,11 @@ function createNurseryView(): HTMLElement {
         const scrollLeft = treeContainer.scrollLeft;
         const scrollTop = treeContainer.scrollTop;
 
+        const processedPairs = new Set<string>();
+
         allChars.forEach(child => {
           if (!child.parentIds) return;
-          if (!treeMemberIds.has(child.id)) return; // skip if child not rendered
+          if (!treeMemberIds.has(child.id)) return;
 
           const childCard = treeContainer.querySelector(`[data-id="${child.id}"].tree-node-card`);
           if (!childCard) return;
@@ -2679,9 +2912,59 @@ function createNurseryView(): HTMLElement {
           const childX = childRect.left + childRect.width / 2 - containerRect.left + scrollLeft;
           const childY = childRect.top - containerRect.top + scrollTop;
 
-          child.parentIds.forEach(parentId => {
-            if (!treeMemberIds.has(parentId)) return; // skip if parent not rendered
+          const parentIds = child.parentIds.filter(pid => treeMemberIds.has(pid));
 
+          if (parentIds.length === 2) {
+            const [pAId, pBId] = parentIds;
+            const pACard = treeContainer.querySelector(`[data-id="${pAId}"].tree-node-card`);
+            const pBCard = treeContainer.querySelector(`[data-id="${pBId}"].tree-node-card`);
+
+            if (pACard && pBCard) {
+              const pARect = pACard.getBoundingClientRect();
+              const pBRect = pBCard.getBoundingClientRect();
+
+              const pAX = pARect.left + pARect.width / 2 - containerRect.left + scrollLeft;
+              const pAY_bottom = pARect.top + pARect.height - containerRect.top + scrollTop;
+
+              const pBX = pBRect.left + pBRect.width / 2 - containerRect.left + scrollLeft;
+              const pBY_bottom = pBRect.top + pBRect.height - containerRect.top + scrollTop;
+
+              const bottomY = (pAY_bottom + pBY_bottom) / 2;
+              const midX = (pAX + pBX) / 2;
+              const midY = bottomY;
+
+              const pairKey = [pAId, pBId].sort().join("___");
+              if (!processedPairs.has(pairKey)) {
+                processedPairs.add(pairKey);
+
+                // Draw horizontal line connecting partners
+                const hLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                hLine.setAttribute("x1", pAX.toString());
+                hLine.setAttribute("y1", bottomY.toString());
+                hLine.setAttribute("x2", pBX.toString());
+                hLine.setAttribute("y2", bottomY.toString());
+                hLine.setAttribute("stroke", "#f43f5e");
+                hLine.setAttribute("stroke-width", "3");
+                hLine.setAttribute("stroke-opacity", "0.80");
+                svg.appendChild(hLine);
+              }
+
+              // Route descendant line downwards from center point (midX, midY) of the horizontal line
+              const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+              const midWayY = (midY + childY) / 2;
+              const d = `M ${midX} ${midY} C ${midX} ${midWayY}, ${childX} ${midWayY}, ${childX} ${childY}`;
+              path.setAttribute("d", d);
+              path.setAttribute("stroke", "#f43f5e");
+              path.setAttribute("stroke-width", "2.5");
+              path.setAttribute("stroke-opacity", "0.65");
+              path.setAttribute("fill", "none");
+              svg.appendChild(path);
+              return;
+            }
+          }
+
+          // Fallback if 1 parent or cards missing
+          parentIds.forEach(parentId => {
             const parentCard = treeContainer.querySelector(`[data-id="${parentId}"].tree-node-card`);
             if (!parentCard) return;
 
@@ -2689,7 +2972,6 @@ function createNurseryView(): HTMLElement {
             const parentX = parentRect.left + parentRect.width / 2 - containerRect.left + scrollLeft;
             const parentY = parentRect.top + parentRect.height - containerRect.top + scrollTop;
 
-            // Draw elegant curved bezier line connecting generations
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
             const midY = (parentY + childY) / 2;
             const d = `M ${parentX} ${parentY} C ${parentX} ${midY}, ${childX} ${midY}, ${childX} ${childY}`;
@@ -3136,7 +3418,17 @@ function createExpeditionsView(): HTMLElement {
           const rel = state.relationships[relId];
           rel.stats.affection = Math.min(100, rel.stats.affection + 15);
           rel.stats.trust = Math.min(100, rel.stats.trust + 15);
-          logText += `❤️ **BOND STRENGTHENED**: Shared triumph has increased their Affection and Trust by **+15%**!`;
+          logText += `❤️ **BOND STRENGTHENED**: Shared triumph has increased their Affection and Trust by **+15%**!\n\n`;
+        }
+
+        // Expedition Offspring: 20% chance
+        if (!isPartnered(partyA) && !isPartnered(partyB) && checkPairingEligibility(partyA, partyB).eligible) {
+          if (Math.random() < 0.20) {
+            const child = generateOffspring(partyA, partyB);
+            state.offspring.push(child);
+            checkAndUnlockAchievements(child);
+            logText += `🍼 **MIRACLE ON THE TRAIL**: Sharing the triumph of this journey has brought them closer... They have returned with a newly born offspring, **${child.name}** (Gen ${child.generation}), who has been placed in the Nursery!`;
+          }
         }
       } else {
         logText += `${exp.fluffFailure}\n\n`;
