@@ -7,12 +7,16 @@ const makeMockChar = (name: string, species: Character["species"], personality: 
     id: name.toLowerCase(),
     name,
     species,
-    physicalTraits: {
-      skinToneHue: 20, skinToneSat: 50, skinToneLight: 50,
+    gender: "Female",
+    geneticTraits: {
+      skinScaleFurToneHue: 20, skinScaleFurToneSat: 50, skinScaleFurToneLight: 50,
       hairColorHue: 40, hairColorSat: 60, hairColorLight: 30,
       eyeColorHue: 200, eyeColorSat: 80, eyeColorLight: 50,
-      hairStyle: "short", faceShape: "oval", build: "average",
-      markingStyle: "none", accessory: "none"
+      faceShape: "oval", build: "average", height: 170, earShape: "pointed",
+      hairTexture: "wavy", markingsPattern: "none", speciesFeatures: "none"
+    },
+    stylingTraits: {
+      hairStyle: "short", accessory: "none", clothing: "commoner-robe"
     },
     personalityTraits: {
       boldness: 50, warmth: 50, wit: 50, ambition: 50, chaos: 50,

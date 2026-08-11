@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ARCHETYPES, generateNPC } from "../npc";
-import { getRelationshipStage, applyCompatibilityModifiers } from "../dialogue";
+import { getRelationshipStage, applyCompatibilityModifiers, getRelationshipPath } from "../dialogue";
 
 describe("NPC Generation and Dialogue Engine", () => {
   it("procedurally generates diverse NPCs from archetype templates", () => {
@@ -18,6 +18,14 @@ describe("NPC Generation and Dialogue Engine", () => {
     expect(getRelationshipStage(30, 30)).toBe("Acquaintance");
     expect(getRelationshipStage(60, 60)).toBe("Interested");
     expect(getRelationshipStage(90, 90)).toBe("Partner");
+  });
+
+  it("calculates emergent relationship paths correctly", () => {
+    // Rivals to lovers: high rivalry and high attraction
+    expect(getRelationshipPath({ affection: 10, trust: 10, attraction: 50, rivalry: 50 })).toBe("rivalsToLovers");
+
+    // Friends first: High trust, but attraction/rivalry lower
+    expect(getRelationshipPath({ affection: 10, trust: 60, attraction: 20, rivalry: 10 })).toBe("friendsFirst");
   });
 
   it("applies compatibility multipliers to stat deltas", () => {

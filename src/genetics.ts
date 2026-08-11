@@ -1,9 +1,9 @@
-import { Character } from "./types";
+import { Character, GameSpecies, GeneticTraits, StylingTraits } from "./types";
 
 /**
  * Generate a random id.
  */
-function uuid(): string {
+export function uuid(): string {
   return Math.random().toString(36).substring(2, 11);
 }
 
@@ -27,7 +27,6 @@ export function hslToHex(h: number, s: number, l: number): string {
 export function blendHue(h1: number, h2: number): number {
   const diff = Math.abs(h1 - h2);
   if (diff > 180) {
-    // Wrap around blending
     const avg = (h1 + h2 + 360) / 2;
     return avg % 360;
   }
@@ -44,7 +43,7 @@ function clamp(val: number, min: number, max: number): number {
 /**
  * Generate a list of cool and playful fantasy-sounding names based on species
  */
-export function generateFantasyName(species: Character["species"]): string {
+export function generateFantasyName(species: GameSpecies): string {
   const humanFirst = ["Eldrin", "Kael", "Lyra", "Rowan", "Seraphina", "Dorian", "Aislin", "Gideon", "Saffron"];
   const humanLast = ["Stormweaver", "Oakheart", "Starling", "Silverwood", "Briarwood", "Crowley", "Hawthorne"];
 
@@ -54,11 +53,20 @@ export function generateFantasyName(species: Character["species"]): string {
   const dwarfFirst = ["Thorgar", "Bram", "Helga", "Ulfric", "Dagna", "Gimli", "Brokk", "Sari", "Grenda"];
   const dwarfLast = ["Ironbreaker", "Stonefist", "Goldvein", "Copperforge", "Deepdelve", "Mountainborn"];
 
+  const halflingFirst = ["Bodo", "Cora", "Milo", "Pippin", "Rosie", "Toby", "Penny", "Finnan", "Lilly"];
+  const halflingLast = ["Tealeaf", "Brushgather", "Underbough", "Hilltopple", "Goodbarrel", "Greenbottle"];
+
+  const gnomeFirst = ["Gimble", "Zook", "Pip", "Tink", "Nissa", "Fizban", "Wrenn", "Oda", "Loopmottin"];
+  const gnomeLast = ["Sparklegem", "Nackle", "Folkor", "Beren", "Doublelock", "Scheppen"];
+
   const orcFirst = ["Garrok", "Mog", "Karg", "Runa", "Grisha", "Zub", "Throm", "Grakka", "Shanka"];
   const orcLast = ["Skullcrusher", "Bloodtusk", "Ironhide", "Direclaw", "Doomhammer", "Wildfury"];
 
   const tieflingFirst = ["Malakar", "Lilith", "Zariel", "Sariel", "Xandor", "Mephisto", "Damakos", "Verity", "Hope"];
   const tieflingLast = ["Hellfire", "Shadowbrand", "Sorrowgaze", "Ashenheart", "Soulweaver", "Brimstone"];
+
+  const dragonbornFirst = ["Balasar", "Donaar", "Ghesh", "Kriv", "Medrash", "Patrin", "Arjhan", "Nala", "Biri"];
+  const dragonbornLast = ["Clearsighted", "Drachedandion", "Kepeshkmolik", "Myastan", "Turnuroth", "Ophidius"];
 
   const beastfolkFirst = ["Rox", "Finn", "Cleo", "Buster", "Luna", "Pip", "Ziggy", "Willow", "Jasper"];
   const beastfolkLast = ["Swiftclaw", "Goldtail", "Softfur", "Nightstalk", "Featherwing", "Wildpaws"];
@@ -67,13 +75,21 @@ export function generateFantasyName(species: Character["species"]): string {
 
   switch (species) {
     case "Elf":
+    case "Half-Elf":
       return `${pick(elfFirst)} ${pick(elfLast)}`;
     case "Dwarf":
       return `${pick(dwarfFirst)} ${pick(dwarfLast)}`;
+    case "Halfling":
+      return `${pick(halflingFirst)} ${pick(halflingLast)}`;
+    case "Gnome":
+      return `${pick(gnomeFirst)} ${pick(gnomeLast)}`;
     case "Orc":
+    case "Half-Orc":
       return `${pick(orcFirst)} ${pick(orcLast)}`;
     case "Tiefling":
       return `${pick(tieflingFirst)} ${pick(tieflingLast)}`;
+    case "Dragonborn":
+      return `${pick(dragonbornFirst)} ${pick(dragonbornLast)}`;
     case "Beastfolk":
       return `${pick(beastfolkFirst)} ${pick(beastfolkLast)}`;
     case "Human":
@@ -83,18 +99,42 @@ export function generateFantasyName(species: Character["species"]): string {
 }
 
 /**
+ * Determine the hybrid species based on parent species.
+ */
+export function resolveHybridSpecies(speciesA: GameSpecies, speciesB: GameSpecies): GameSpecies {
+  if (speciesA === speciesB) return speciesA;
+
+  // Human + Elf -> Half-Elf
+  if ((speciesA === "Human" && speciesB === "Elf") || (speciesA === "Elf" && speciesB === "Human")) {
+    return "Half-Elf";
+  }
+
+  // Human + Orc -> Half-Orc
+  if ((speciesA === "Human" && speciesB === "Orc") || (speciesA === "Orc" && speciesB === "Human")) {
+    return "Half-Orc";
+  }
+
+  // Fallback: 50% chance of parent A or parent B
+  return Math.random() < 0.5 ? speciesA : speciesB;
+}
+
+/**
  * Pure function: generateOffspring(parentA, parentB) -> Character
  * Generates an offspring character inheriting physical and personality traits from both parents,
  * with options for color-blending, parts inheritance, and mutations.
+ * Strictly respects the genetic/styling split.
  */
 export function generateOffspring(parentA: Character, parentB: Character): Character {
   const mutationChance = 0.15; // 15% chance for a specific trait to mutate completely
 
-  // Species: 50% chance of either parent's species
-  const species = Math.random() < 0.5 ? parentA.species : parentB.species;
+  // Resolve hybrid species
+  const species = resolveHybridSpecies(parentA.species, parentB.species);
 
-  // Let's build physical traits
-  // For colors, we blend by default (with a bit of random deviation), or mutate entirely.
+  // Gender assignment
+  const genders: Character["gender"][] = ["Male", "Female", "Non-binary"];
+  const gender = genders[Math.floor(Math.random() * genders.length)];
+
+  // 1. INHERITING GENETIC TRAITS
   const inheritColor = (colorA: { h: number; s: number; l: number }, colorB: { h: number; s: number; l: number }) => {
     if (Math.random() < mutationChance) {
       // Complete color mutation (randomized)
@@ -104,7 +144,6 @@ export function generateOffspring(parentA: Character, parentB: Character): Chara
         l: clamp(Math.floor(Math.random() * 40) + 30, 20, 95)  // 30-70%
       };
     }
-    // Blend hues and average sat/lightness with a minor +/- 5% wobble
     const wobble = () => Math.floor(Math.random() * 11) - 5; // -5 to +5
     return {
       h: Math.round((blendHue(colorA.h, colorB.h) + wobble() + 360) % 360),
@@ -114,26 +153,19 @@ export function generateOffspring(parentA: Character, parentB: Character): Chara
   };
 
   const skin = inheritColor(
-    { h: parentA.physicalTraits.skinToneHue, s: parentA.physicalTraits.skinToneSat, l: parentA.physicalTraits.skinToneLight },
-    { h: parentB.physicalTraits.skinToneHue, s: parentB.physicalTraits.skinToneSat, l: parentB.physicalTraits.skinToneLight }
+    { h: parentA.geneticTraits.skinScaleFurToneHue, s: parentA.geneticTraits.skinScaleFurToneSat, l: parentA.geneticTraits.skinScaleFurToneLight },
+    { h: parentB.geneticTraits.skinScaleFurToneHue, s: parentB.geneticTraits.skinScaleFurToneSat, l: parentB.geneticTraits.skinScaleFurToneLight }
   );
 
   const hair = inheritColor(
-    { h: parentA.physicalTraits.hairColorHue, s: parentA.physicalTraits.hairColorSat, l: parentA.physicalTraits.hairColorLight },
-    { h: parentB.physicalTraits.hairColorHue, s: parentB.physicalTraits.hairColorSat, l: parentB.physicalTraits.hairColorLight }
+    { h: parentA.geneticTraits.hairColorHue, s: parentA.geneticTraits.hairColorSat, l: parentA.geneticTraits.hairColorLight },
+    { h: parentB.geneticTraits.hairColorHue, s: parentB.geneticTraits.hairColorSat, l: parentB.geneticTraits.hairColorLight }
   );
 
   const eye = inheritColor(
-    { h: parentA.physicalTraits.eyeColorHue, s: parentA.physicalTraits.eyeColorSat, l: parentA.physicalTraits.eyeColorLight },
-    { h: parentB.physicalTraits.eyeColorHue, s: parentB.physicalTraits.eyeColorSat, l: parentB.physicalTraits.eyeColorLight }
+    { h: parentA.geneticTraits.eyeColorHue, s: parentA.geneticTraits.eyeColorSat, l: parentA.geneticTraits.eyeColorLight },
+    { h: parentB.geneticTraits.eyeColorHue, s: parentB.geneticTraits.eyeColorSat, l: parentB.geneticTraits.eyeColorLight }
   );
-
-  // Style properties: 50% A, 50% B, or mutated
-  const hairStyles = ["short", "long", "braids", "curls", "crest", "afro", "mohawk"];
-  const faceShapes = ["round", "sharp", "oval", "square"];
-  const builds: Array<Character["physicalTraits"]["build"]> = ["slender", "average", "muscular", "stocky"];
-  const markingStyles = ["none", "tattoos", "scars", "stripes", "freckles"];
-  const accessories = ["none", "earrings", "glasses", "crown", "circlet", "eyepatch"];
 
   const inheritDiscrete = <T>(valA: T, valB: T, pool: T[]): T => {
     if (Math.random() < mutationChance) {
@@ -142,19 +174,76 @@ export function generateOffspring(parentA: Character, parentB: Character): Chara
     return Math.random() < 0.5 ? valA : valB;
   };
 
-  const hairStyle = inheritDiscrete(parentA.physicalTraits.hairStyle, parentB.physicalTraits.hairStyle, hairStyles);
-  const faceShape = inheritDiscrete(parentA.physicalTraits.faceShape, parentB.physicalTraits.faceShape, faceShapes);
-  const build = inheritDiscrete(parentA.physicalTraits.build, parentB.physicalTraits.build, builds);
-  const markingStyle = inheritDiscrete(parentA.physicalTraits.markingStyle, parentB.physicalTraits.markingStyle, markingStyles);
-  const accessory = inheritDiscrete(parentA.physicalTraits.accessory, parentB.physicalTraits.accessory, accessories);
+  const faceShapes = ["round", "sharp", "oval", "square"];
+  const builds: Array<Character["geneticTraits"]["build"]> = ["slender", "average", "muscular", "stocky"];
+  const earShapes = ["normal", "pointed", "long", "animal", "broad"];
+  const hairTextures = ["straight", "wavy", "curly", "coily", "wild"];
+  const markingsPatterns = ["none", "tattoos", "scars", "stripes", "freckles"];
+  const speciesFeaturesList = ["none", "horns", "tail", "wings", "fangs", "fluffy-tail"];
 
-  // Personality Traits: Blend both parents' values with a mutation offset
+  const faceShape = inheritDiscrete(parentA.geneticTraits.faceShape, parentB.geneticTraits.faceShape, faceShapes);
+  const build = inheritDiscrete(parentA.geneticTraits.build, parentB.geneticTraits.build, builds);
+  const earShape = inheritDiscrete(parentA.geneticTraits.earShape, parentB.geneticTraits.earShape, earShapes);
+  const hairTexture = inheritDiscrete(parentA.geneticTraits.hairTexture, parentB.geneticTraits.hairTexture, hairTextures);
+  const markingsPattern = inheritDiscrete(parentA.geneticTraits.markingsPattern, parentB.geneticTraits.markingsPattern, markingsPatterns);
+
+  // Specific species features logic
+  let speciesFeatures = inheritDiscrete(parentA.geneticTraits.speciesFeatures, parentB.geneticTraits.speciesFeatures, speciesFeaturesList);
+  if (species === "Tiefling" && speciesFeatures === "none") {
+    speciesFeatures = "horns"; // Tieflings should default to horns
+  } else if (species === "Dragonborn" && speciesFeatures === "none") {
+    speciesFeatures = "tail"; // Dragonborn gets tail/scales
+  }
+
+  // Height inheritance: average of both parents with minor wobble, clamped between 100 and 220
+  let parentHeightA = parentA.geneticTraits.height || 170;
+  let parentHeightB = parentB.geneticTraits.height || 170;
+  let height = Math.round((parentHeightA + parentHeightB) / 2 + (Math.floor(Math.random() * 11) - 5));
+  if (Math.random() < mutationChance) {
+    // Complete height mutation
+    if (species === "Dwarf" || species === "Halfling" || species === "Gnome") {
+      height = Math.floor(Math.random() * 40) + 100; // 100 to 140
+    } else {
+      height = Math.floor(Math.random() * 60) + 150; // 150 to 210
+    }
+  }
+  height = clamp(height, 100, 220);
+
+  const geneticTraits: GeneticTraits = {
+    skinScaleFurToneHue: skin.h,
+    skinScaleFurToneSat: skin.s,
+    skinScaleFurToneLight: skin.l,
+    hairColorHue: hair.h,
+    hairColorSat: hair.s,
+    hairColorLight: hair.l,
+    eyeColorHue: eye.h,
+    eyeColorSat: eye.s,
+    eyeColorLight: eye.l,
+    faceShape,
+    build,
+    height,
+    earShape,
+    hairTexture,
+    markingsPattern,
+    speciesFeatures
+  };
+
+  // 2. STYLING TRAITS (Randomized completely, never inherited!)
+  const hairStyles = ["short", "long", "braids", "curls", "crest", "afro", "mohawk", "bald"];
+  const accessories = ["none", "earrings", "glasses", "crown", "circlet", "eyepatch", "collar"];
+  const clothings = ["commoner-robe", "knight-armor", "mage-cloak", "bard-tunic", "rogue-leather", "baker-apron"];
+
+  const stylingTraits: StylingTraits = {
+    hairStyle: hairStyles[Math.floor(Math.random() * hairStyles.length)],
+    accessory: accessories[Math.floor(Math.random() * accessories.length)],
+    clothing: clothings[Math.floor(Math.random() * clothings.length)]
+  };
+
+  // 3. PERSONALITY TRAITS: Blend both parents' values with a mutation offset
   const inheritPersonality = (valA: number, valB: number): number => {
     if (Math.random() < mutationChance) {
-      // completely randomized mutation
       return Math.floor(Math.random() * 101);
     }
-    // blend plus minor mutation nudge of -15 to +15
     const nudge = Math.floor(Math.random() * 31) - 15;
     return clamp(Math.round((valA + valB) / 2 + nudge), 0, 100);
   };
@@ -167,28 +256,15 @@ export function generateOffspring(parentA: Character, parentB: Character): Chara
 
   // Background/Flavor
   const name = generateFantasyName(species);
-  const background = `Offspring of ${parentA.name} and ${parentB.name}. Inherited ${parentA.name}'s ${parentA.physicalTraits.hairStyle} locks and ${parentB.name}'s ${parentB.physicalTraits.build} build.`;
+  const background = `The offspring of ${parentA.name} and ${parentB.name}. Inherited a blended ${species} heritage, with parentage traits and completely unique fashion styling.`;
 
   return {
     id: uuid(),
     name,
     species,
-    physicalTraits: {
-      skinToneHue: skin.h,
-      skinToneSat: skin.s,
-      skinToneLight: skin.l,
-      hairColorHue: hair.h,
-      hairColorSat: hair.s,
-      hairColorLight: hair.l,
-      eyeColorHue: eye.h,
-      eyeColorSat: eye.s,
-      eyeColorLight: eye.l,
-      hairStyle,
-      faceShape,
-      build,
-      markingStyle,
-      accessory
-    },
+    gender,
+    geneticTraits,
+    stylingTraits,
     personalityTraits: {
       boldness,
       warmth,
