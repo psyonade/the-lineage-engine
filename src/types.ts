@@ -64,6 +64,8 @@ export interface Character {
   legendaryTraits?: string[];       // Separate category of inheritable traits
   carriedTraits?: string[];         // Recessively carried genetic/legendary traits
   generation?: number;              // Generation level (Player = 1, Offspring = Parent + 1)
+  isFormerPC?: boolean;             // Retreated/retired main player character
+  isPC?: boolean;                   // Flag indicating if this character was a main PC in their life
 }
 
 export type RelationshipStage = "Stranger" | "Acquaintance" | "Interested" | "Partner";
@@ -139,4 +141,6 @@ export interface SaveState {
   currentSeason?: number;
   actionPoints?: number;
   unlockedAchievements?: string[];
+  unlockedItems?: string[];          // List of unlocked accessory/clothing strings (e.g. 'crown', 'mage-cloak')
+  unlockedBackgrounds?: string[];     // List of unlocked background IDs/strings
 }
