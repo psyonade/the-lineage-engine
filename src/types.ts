@@ -60,6 +60,10 @@ export interface Character {
   questStage?: number;              // Current stage of quest (e.g. 0 to 3)
   parentIds?: [string, string];     // Present if origin === "offspring"
   parentNames?: [string, string];   // Visual reference
+  age?: number;                     // Season/turn clock age: 0-2 (Youth), 3-8 (Prime), 9+ (Elder)
+  legendaryTraits?: string[];       // Separate category of inheritable traits
+  carriedTraits?: string[];         // Recessively carried genetic/legendary traits
+  generation?: number;              // Generation level (Player = 1, Offspring = Parent + 1)
 }
 
 export type RelationshipStage = "Stranger" | "Acquaintance" | "Interested" | "Partner";
@@ -132,4 +136,7 @@ export interface SaveState {
   npcs: Character[];
   relationships: Record<string, Relationship>; // Key is NPC ID
   offspring: Character[];
+  currentSeason?: number;
+  actionPoints?: number;
+  unlockedAchievements?: string[];
 }

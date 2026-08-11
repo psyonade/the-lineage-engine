@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateOffspring, blendHue } from "../genetics";
+import { generateOffspring, blendHue, checkPairingEligibility } from "../genetics";
 import { Character } from "../types";
 
 const makeMockChar = (id: string, name: string, species: Character["species"], color: number, traits: Partial<Character["personalityTraits"]>): Character => {
@@ -50,5 +50,70 @@ describe("Genetics / Offspring Engine", () => {
     // Blended or mutated personality
     expect(offspring.personalityTraits.warmth).toBeGreaterThanOrEqual(0);
     expect(offspring.personalityTraits.warmth).toBeLessThanOrEqual(100);
+  });
+
+  describe("Lineage Depth and Pairing Eligibility", () => {
+
+    it("verifies pairing eligibility based on age stages", () => {
+      const parentA = makeMockChar("pA", "Arthur", "Human", 40, {});
+      const parentB = makeMockChar("pB", "Bess", "Elf", 80, {});
+
+      // Default mock chars don't have age, so they default to 3 (Prime)
+      expect(checkPairingEligibility(parentA, parentB).eligible).toBe(true);
+
+      // Youth cannot breed
+      parentA.age = 1; // Youth
+      expect(checkPairingEligibility(parentA, parentB).eligible).toBe(false);
+      expect(checkPairingEligibility(parentA, parentB).reason).toContain("breeding age");
+
+      // Elder cannot breed
+      parentA.age = 10; // Elder
+      expect(checkPairingEligibility(parentA, parentB).eligible).toBe(false);
+      expect(checkPairingEligibility(parentA, parentB).reason).toContain("breeding age");
+    });
+
+    it("prevents direct parent-child pairings", () => {
+      const parentA = makeMockChar("pA", "Arthur", "Human", 40, {});
+      const parentB = makeMockChar("pB", "Bess", "Elf", 80, {});
+
+      const child = generateOffspring(parentA, parentB);
+      child.age = 3; // make it prime
+
+      // Attempt to breed child with parentA
+      const result = checkPairingEligibility(child, parentA);
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toContain("parent-child");
+    });
+
+    it("prevents sibling pairings", () => {
+      const parentA = makeMockChar("pA", "Arthur", "Human", 40, {});
+      const parentB = makeMockChar("pB", "Bess", "Elf", 80, {});
+
+      const sibling1 = generateOffspring(parentA, parentB);
+      const sibling2 = generateOffspring(parentA, parentB);
+      sibling1.age = 3;
+      sibling2.age = 3;
+
+      const result = checkPairingEligibility(sibling1, sibling2);
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toContain("sibling");
+    });
+
+    it("handles legendary and recessive trait inheritance across generations", () => {
+      const parentA = makeMockChar("pA", "Arthur", "Human", 40, {});
+      parentA.legendaryTraits = ["Moonlight Grace"];
+
+      const parentB = makeMockChar("pB", "Bess", "Elf", 80, {});
+
+      // Create children, some should express or carry the legendary trait
+      const children = Array.from({ length: 25 }).map(() => generateOffspring(parentA, parentB));
+
+      const someExpressOrCarry = children.some(child => {
+        const carries = child.carriedTraits?.includes("Moonlight Grace");
+        const expresses = child.legendaryTraits?.includes("Moonlight Grace");
+        return carries || expresses;
+      });
+      expect(someExpressOrCarry).toBe(true);
+    });
   });
 });

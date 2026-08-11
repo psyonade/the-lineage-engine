@@ -80,10 +80,10 @@ export function renderCharacter(
   // 3. Body silhouettes with legs
   let shoulderWidth = 60;
   let hipWidth = 50;
-  let chestY = 240;
-  let waistY = 290;
-  let hipY = 340;
-  let ankleY = 430;
+  let chestY = 170;
+  let waistY = 220;
+  let hipY = 270;
+  let ankleY = 410;
 
   if (g.build === "slender") {
     shoulderWidth = 45;
@@ -98,8 +98,6 @@ export function renderCharacter(
 
   // Build full body torso and legs
   baseBody = `
-    <!-- Neck -->
-    <rect x="90" y="130" width="20" height="40" fill="${skinHSL}" stroke="#1e293b" stroke-width="2" />
     <!-- Torso -->
     <path d="M ${100 - shoulderWidth} ${chestY}
              Q ${100 - shoulderWidth / 2} ${waistY}, ${100 - hipWidth} ${hipY}
@@ -134,7 +132,7 @@ export function renderCharacter(
       clothingLayer = `
         <!-- Royal purple robes -->
         <path d="M 80 145 L ${100 - shoulderWidth - 6} ${chestY} L ${100 - hipWidth - 12} ${ankleY} L ${100 + hipWidth + 12} ${ankleY} L ${100 + shoulderWidth + 6} ${chestY} L 120 145 Z" fill="#4c1d95" stroke="#2e1065" stroke-width="2" />
-        <path d="M 90 145 L 100 240 L 110 145" fill="#f59e0b" stroke="#b45309" stroke-width="1.5" />
+        <path d="M 90 145 L 100 ${chestY} L 110 145" fill="#f59e0b" stroke="#b45309" stroke-width="1.5" />
       `;
       break;
     case "bard-tunic":
@@ -161,9 +159,9 @@ export function renderCharacter(
         <!-- White baker apron and brown shirt -->
         <path d="M ${100 - shoulderWidth} ${chestY} L ${100 - hipWidth} ${hipY + 10} L ${100 + hipWidth} ${hipY + 10} L ${100 + shoulderWidth} ${chestY} Z" fill="#78350f" />
         <!-- Apron overlay -->
-        <path d="M 80 220 L 120 220 L 115 360 L 85 360 Z" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
-        <line x1="80" y1="220" x2="65" y2="240" stroke="#f1f5f9" stroke-width="3" />
-        <line x1="120" y1="220" x2="135" y2="240" stroke="#f1f5f9" stroke-width="3" />
+        <path d="M 80 150 L 120 150 L 115 290 L 85 290 Z" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+        <line x1="80" y1="150" x2="65" y2="170" stroke="#f1f5f9" stroke-width="3" />
+        <line x1="120" y1="150" x2="135" y2="170" stroke="#f1f5f9" stroke-width="3" />
       `;
       break;
     case "commoner-robe":
@@ -412,20 +410,27 @@ export function renderCharacter(
       <circle cx="100" cy="120" r="105" fill="#1e293b" opacity="0.3" />
       <circle cx="100" cy="120" r="85" fill="none" stroke="#334155" stroke-width="1" stroke-dasharray="4,4" />
 
-      <!-- Apply visual scaling group for Species heights (only translates in Y and scales vertically) -->
-      <g transform="translate(0, ${translateY}) scale(${scaleX}, ${scaleY})">
+      <!-- Back Hair (for long hairstyles to slide behind the body, unscaled) -->
+      ${s.hairStyle === "long" ? hairPath : ""}
 
-        <!-- Back features (wings/tail) -->
+      <!-- 1. Scaled Back features (wings/tail) -->
+      <g transform="translate(0, 170) scale(1, ${heightScale}) translate(0, -170)">
         ${speciesFeaturesBack}
+      </g>
 
-        <!-- Back Hair (for long hairstyles to slide behind the body) -->
-        ${s.hairStyle === "long" ? hairPath : ""}
-
+      <!-- 2. Scaled Body, limbs, and clothing -->
+      <g transform="translate(0, 170) scale(1, ${heightScale}) translate(0, -170)">
         <!-- Base Body / Silhouette / Legs -->
         ${baseBody}
 
         <!-- Clothing overlay -->
         ${clothingLayer}
+      </g>
+
+      <!-- 3. Unscaled Head, Neck, Face & Accessories (stays consistent while body/height scales) -->
+      <g>
+        <!-- Neck -->
+        <rect x="90" y="130" width="20" height="40" fill="${skinHSL}" stroke="#1e293b" stroke-width="2" />
 
         <!-- Ears (behind face) -->
         ${earPath}
@@ -454,7 +459,6 @@ export function renderCharacter(
 
         <!-- Accessories on top -->
         ${accessoryPath}
-
       </g>
     </svg>
   `;
