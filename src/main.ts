@@ -52,9 +52,24 @@ function performSuccession(successor: Character) {
   const newPlayer = { ...successor };
   newPlayer.id = "player";
   newPlayer.isPC = true;
+  if (newPlayer.parentIds) {
+    newPlayer.parentIds = newPlayer.parentIds.map(pid => pid === "player" ? formerPlayer.id : pid) as [string, string];
+  }
 
   // Remove successor from offspring list
   state.offspring = state.offspring.filter(c => c.id !== successor.id);
+
+  // Update parentIds for all existing npcs and offspring to point to the retired parent's new ID
+  state.npcs.forEach(npc => {
+    if (npc.parentIds) {
+      npc.parentIds = npc.parentIds.map(pid => pid === "player" ? formerPlayer.id : pid) as [string, string];
+    }
+  });
+  state.offspring.forEach(o => {
+    if (o.parentIds) {
+      o.parentIds = o.parentIds.map(pid => pid === "player" ? formerPlayer.id : pid) as [string, string];
+    }
+  });
 
   // Add retired parent to the NPC pool
   state.npcs.push(formerPlayer);
