@@ -7,12 +7,16 @@ const makeMockChar = (id: string, name: string, species: Character["species"], c
     id,
     name,
     species,
-    physicalTraits: {
-      skinToneHue: color, skinToneSat: 50, skinToneLight: 50,
+    gender: "Female",
+    geneticTraits: {
+      skinScaleFurToneHue: color, skinScaleFurToneSat: 50, skinScaleFurToneLight: 50,
       hairColorHue: color, hairColorSat: 60, hairColorLight: 30,
       eyeColorHue: color, eyeColorSat: 80, eyeColorLight: 50,
-      hairStyle: "short", faceShape: "oval", build: "average",
-      markingStyle: "none", accessory: "none"
+      faceShape: "oval", build: "average", height: 170, earShape: "pointed",
+      hairTexture: "wavy", markingsPattern: "none", speciesFeatures: "none"
+    },
+    stylingTraits: {
+      hairStyle: "short", accessory: "none", clothing: "commoner-robe"
     },
     personalityTraits: {
       boldness: 50, warmth: 50, wit: 50, ambition: 50, chaos: 50,
@@ -40,7 +44,8 @@ describe("Genetics / Offspring Engine", () => {
     expect(offspring.parentIds).toContain("pB");
     expect(offspring.parentNames).toContain("Arthur");
     expect(offspring.parentNames).toContain("Bess");
-    expect(["Human", "Elf"]).toContain(offspring.species);
+    // Canonical Half-Elf check: Human + Elf -> Half-Elf
+    expect(offspring.species).toBe("Half-Elf");
 
     // Blended or mutated personality
     expect(offspring.personalityTraits.warmth).toBeGreaterThanOrEqual(0);
