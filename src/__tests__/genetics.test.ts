@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateOffspring, blendHue, checkPairingEligibility } from "../genetics";
+import { generateOffspring, blendHue, checkPairingEligibility, isRestrictedFamily } from "../genetics";
 import { Character } from "../types";
 
 const makeMockChar = (id: string, name: string, species: Character["species"], color: number, traits: Partial<Character["personalityTraits"]>): Character => {
@@ -99,6 +99,19 @@ describe("Genetics / Offspring Engine", () => {
       expect(result.reason).toContain("sibling");
     });
 
+    it("identifies restricted family members correctly with isRestrictedFamily", () => {
+      const parentA = makeMockChar("pA", "Arthur", "Human", 40, {});
+      const parentB = makeMockChar("pB", "Bess", "Elf", 80, {});
+
+      const child = generateOffspring(parentA, parentB);
+      const sibling = generateOffspring(parentA, parentB);
+
+      expect(isRestrictedFamily(parentA, parentB)).toBe(false);
+      expect(isRestrictedFamily(parentA, child)).toBe(true);
+      expect(isRestrictedFamily(child, parentA)).toBe(true);
+      expect(isRestrictedFamily(child, sibling)).toBe(true);
+    });
+
     it("handles legendary and recessive trait inheritance across generations", () => {
       const parentA = makeMockChar("pA", "Arthur", "Human", 40, {});
       parentA.legendaryTraits = ["Moonlight Grace"];
@@ -114,6 +127,12 @@ describe("Genetics / Offspring Engine", () => {
         return carries || expresses;
       });
       expect(someExpressOrCarry).toBe(true);
+    });
+
+    it("supports optional partnerId schema for NPC-to-NPC pairings", () => {
+      const parentA = makeMockChar("pA", "Arthur", "Human", 40, {});
+      parentA.partnerId = "pB";
+      expect(parentA.partnerId).toBe("pB");
     });
   });
 });

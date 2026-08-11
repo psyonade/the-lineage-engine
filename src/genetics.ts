@@ -22,6 +22,27 @@ export function hslToHex(h: number, s: number, l: number): string {
 }
 
 /**
+ * Helper to check if two characters are restricted family members (direct parent-child or full siblings).
+ */
+export function isRestrictedFamily(charA: Character, charB: Character): boolean {
+  if (charA.id === charB.id) return true;
+
+  // Parent-child restriction
+  if (charA.parentIds && charA.parentIds.includes(charB.id)) return true;
+  if (charB.parentIds && charB.parentIds.includes(charA.id)) return true;
+
+  // Sibling restriction (share the same parents)
+  if (charA.parentIds && charB.parentIds) {
+    const [pA1, pA2] = charA.parentIds;
+    const [pB1, pB2] = charB.parentIds;
+    const shareBoth = (pA1 === pB1 && pA2 === pB2) || (pA1 === pB2 && pA2 === pB1);
+    if (shareBoth) return true;
+  }
+
+  return false;
+}
+
+/**
  * Check eligibility of two characters for pairing (Prime age, incest check).
  */
 export function checkPairingEligibility(charA: Character, charB: Character): { eligible: boolean; reason?: string } {
@@ -39,26 +60,8 @@ export function checkPairingEligibility(charA: Character, charB: Character): { e
     return { eligible: false, reason: `${charB.name} is not in their Prime breeding age (current age: ${ageB} seasons, stage: ${ageB < 3 ? "Youth" : "Elder"}).` };
   }
 
-  // Parent-child restriction
-  if (charA.parentIds) {
-    if (charA.parentIds.includes(charB.id)) {
-      return { eligible: false, reason: "Direct parent-child pairings are forbidden." };
-    }
-  }
-  if (charB.parentIds) {
-    if (charB.parentIds.includes(charA.id)) {
-      return { eligible: false, reason: "Direct parent-child pairings are forbidden." };
-    }
-  }
-
-  // Sibling restriction (share the same parents)
-  if (charA.parentIds && charB.parentIds) {
-    const [pA1, pA2] = charA.parentIds;
-    const [pB1, pB2] = charB.parentIds;
-    const shareBoth = (pA1 === pB1 && pA2 === pB2) || (pA1 === pB2 && pA2 === pB1);
-    if (shareBoth) {
-      return { eligible: false, reason: "Full-sibling pairings are forbidden." };
-    }
+  if (isRestrictedFamily(charA, charB)) {
+    return { eligible: false, reason: "Direct parent-child and full-sibling pairings are forbidden." };
   }
 
   return { eligible: true };

@@ -66,6 +66,7 @@ export interface Character {
   generation?: number;              // Generation level (Player = 1, Offspring = Parent + 1)
   isFormerPC?: boolean;             // Retreated/retired main player character
   isPC?: boolean;                   // Flag indicating if this character was a main PC in their life
+  partnerId?: string;               // Partner character ID for NPC-to-NPC pairings
 }
 
 export type RelationshipStage = "Stranger" | "Acquaintance" | "Interested" | "Partner";
