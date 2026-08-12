@@ -6,9 +6,16 @@ import { renderCharacter } from "./renderer";
 import { computeCompatibility } from "./compatibility";
 import { DIALOGUE_SCENES, getRelationshipStage, applyCompatibilityModifiers, getRelationshipPath } from "./dialogue";
 import { generateOffspring, checkPairingEligibility, isRestrictedFamily, generateFantasyName } from "./genetics";
+import { computeTreeLayout, generateStressTestMock, TreeLayoutResult, LayoutCoords } from "./treeLayout";
 
 // Initial state
 let state: SaveState = loadGame();
+
+// Stress test active state
+let activeStressTestType: "harem" | "deep" | "web" | null = null;
+
+// Force autonomous event flag for debugging
+let forceAutonomousEvents: boolean = false;
 
 // Ensure safe defaults for lineage, resource management, and legacy depth
 if (!state.currentSeason) state.currentSeason = 1;
@@ -1656,14 +1663,17 @@ function createHubView(): HTMLElement {
 
     const summaryLines: string[] = [];
 
-    // 1. Autonomous NPC Partnerships (10% chance)
+    // 1. Autonomous NPC Partnerships (10% chance, or 100% if debug forced)
     // Candidates are unpartnered cast NPCs in Prime stage (age 3-8)
     const eligibleForPartner = state.npcs.concat(state.offspring).filter(c => {
       const ageVal = c.age ?? 3;
       return ageVal >= 3 && ageVal <= 8 && !isPartnered(c);
     });
 
-    if (eligibleForPartner.length >= 2 && Math.random() < 0.10) {
+    const isPartnerForced = forceAutonomousEvents;
+    const partnerChance = isPartnerForced ? 1.0 : 0.10;
+
+    if (eligibleForPartner.length >= 2 && Math.random() < partnerChance) {
       // Find a random non-incestuous pair
       const shuffled = [...eligibleForPartner].sort(() => Math.random() - 0.5);
       let foundPair: [Character, Character] | null = null;
@@ -1690,8 +1700,11 @@ function createHubView(): HTMLElement {
       return ageVal >= 3 && ageVal <= 8 && !isPartnered(c);
     });
 
-    // 2. Autonomous NPC Offspring - Casual Flings (5% chance)
-    if (eligibleForFling.length >= 2 && Math.random() < 0.05) {
+    // 2. Autonomous NPC Offspring - Casual Flings (5% chance, or 100% if debug forced)
+    const isFlingForced = forceAutonomousEvents;
+    const flingChance = isFlingForced ? 1.0 : 0.05;
+
+    if (eligibleForFling.length >= 2 && Math.random() < flingChance) {
       const shuffled = [...eligibleForFling].sort(() => Math.random() - 0.5);
       let foundPair: [Character, Character] | null = null;
       for (let i = 0; i < shuffled.length; i++) {
@@ -1710,6 +1723,11 @@ function createHubView(): HTMLElement {
         checkAndUnlockAchievements(child);
         summaryLines.push(`🍼 A casual background fling between **${foundPair[0].name}** and **${foundPair[1].name}** has resulted in a new child: **${child.name}**!`);
       }
+    }
+
+    // Reset the debug force event flag after turn executes
+    if (forceAutonomousEvents) {
+      forceAutonomousEvents = false;
     }
 
     triggerRandomHubEvent();
@@ -1748,8 +1766,26 @@ function createHubView(): HTMLElement {
   resetBtn.addEventListener("click", () => {
     if (confirm("Are you sure you want to reset your character and relationships? All progress will be lost!")) {
       clearGame();
-      state = { player: null, npcs: [], relationships: {}, offspring: [], currentSeason: 1, actionPoints: 5, unlockedAchievements: [] };
+      state = {
+        player: null,
+        npcs: [],
+        relationships: {},
+        offspring: [],
+        currentSeason: 1,
+        actionPoints: 5,
+        unlockedAchievements: [],
+        unlockedBackgrounds: [],
+        unlockedItems: []
+      };
       activeView = "creator";
+      activeStressTestType = null;
+      selectedNpcId = null;
+      activeScene = null;
+      activeNodeId = "start";
+      lastDialogueDeltas = {};
+      detailedChildId = null;
+      selectedParentAId = null;
+      selectedParentBId = null;
       renderApp();
     }
   });
@@ -1942,6 +1978,25 @@ function createHubView(): HTMLElement {
   `;
   rightSidebar.appendChild(guideBox);
 
+  // Debug Force Event Panel
+  const debugPanel = document.createElement("div");
+  debugPanel.className = "bg-slate-800/50 border border-slate-700/80 p-5 rounded-2xl space-y-3 text-center";
+  debugPanel.innerHTML = `
+    <h4 class="font-extrabold text-xs text-amber-500 uppercase tracking-widest">🛠️ Debug Toolbox</h4>
+    <p class="text-[10px] text-slate-400 leading-relaxed">Instantly force romantic partnerships & casual flings on the next season turn.</p>
+    <button id="debug-force-events-btn" class="w-full py-2 bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 rounded-xl text-xs font-black transition-all">
+      🛠️ Force Next Turn Events
+    </button>
+  `;
+  rightSidebar.appendChild(debugPanel);
+
+  setTimeout(() => {
+    document.getElementById("debug-force-events-btn")?.addEventListener("click", () => {
+      forceAutonomousEvents = true;
+      showToast("⚡ Autonomous Events Forced! Advance the season ('⌛ End Season') now to witness 100% partnership and fling offspring results.");
+    });
+  }, 10);
+
   contentGrid.appendChild(rightSidebar);
   container.appendChild(contentGrid);
 
@@ -2059,7 +2114,17 @@ function createNpcDetailView(): HTMLElement {
 
   // Start Meeting Button
   const playDialogueBtn = document.createElement("button");
-  playDialogueBtn.className = "w-full py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-slate-900 font-extrabold rounded-xl shadow-lg transition-all text-xs";
+  const currentAP = state.actionPoints ?? 5;
+  const dialogueAffordable = currentAP >= 1;
+
+  playDialogueBtn.className = `w-full py-3 font-extrabold rounded-xl shadow-lg transition-all text-xs ${
+    dialogueAffordable
+      ? "bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-slate-900 cursor-pointer focus:ring-2 focus:ring-amber-500"
+      : "bg-slate-700 text-slate-400 cursor-not-allowed opacity-50"
+  }`;
+  if (!dialogueAffordable) {
+    playDialogueBtn.disabled = true;
+  }
 
   if (npc.isUnique) {
     playDialogueBtn.innerText = `🎬 Continue Storied Quest Line (Stage ${(npc.questStage || 0) + 1})`;
@@ -2068,10 +2133,15 @@ function createNpcDetailView(): HTMLElement {
   }
 
   playDialogueBtn.addEventListener("click", () => {
+    // Immediate double click protection
+    if (playDialogueBtn.disabled) return;
+    playDialogueBtn.disabled = true;
+
     // Resource AP check
-    const currentAP = state.actionPoints ?? 5;
-    if (currentAP <= 0) {
+    const currentAPCheck = state.actionPoints ?? 5;
+    if (currentAPCheck <= 0) {
       showToast("⚠️ Out of Action Points! End the season to restore energy.");
+      playDialogueBtn.disabled = false;
       return;
     }
 
@@ -2097,7 +2167,7 @@ function createNpcDetailView(): HTMLElement {
     }
 
     // Deduct 1 AP for starting interaction
-    state.actionPoints = currentAP - 1;
+    state.actionPoints = currentAPCheck - 1;
     saveGame(state);
 
     activeScene = targetScene;
@@ -2108,33 +2178,40 @@ function createNpcDetailView(): HTMLElement {
   interactionPanel.appendChild(playDialogueBtn);
 
   // Lineage Generation action
-  const isLineageEligible = rel.stats.affection >= 50 || rel.stage === "Interested" || rel.stage === "Partner";
+  const isLineageEligible = (rel.stats.affection >= 50 || rel.stage === "Interested" || rel.stage === "Partner") && currentAP >= 3;
   const pairBtn = document.createElement("button");
   pairBtn.className = `w-full py-3 font-extrabold rounded-xl shadow-lg transition-all text-xs ${
     isLineageEligible
-      ? "bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white cursor-pointer"
+      ? "bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white cursor-pointer focus:ring-2 focus:ring-pink-500"
       : "bg-slate-700 text-slate-400 cursor-not-allowed opacity-50"
   }`;
-  pairBtn.innerHTML = `🍼 Produce Blended Offspring (Requires 50+ Affection) ${isLineageEligible ? "✨" : "🔒"}`;
+  if (!isLineageEligible) {
+    pairBtn.disabled = true;
+  }
+  pairBtn.innerHTML = `🍼 Produce Blended Offspring (Requires 50+ Affection & 3 AP) ${isLineageEligible ? "✨" : "🔒"}`;
   pairBtn.addEventListener("click", () => {
     if (!isLineageEligible) return;
+    if (pairBtn.disabled) return;
+    pairBtn.disabled = true;
 
     // Check pairing eligibility / incest prevention
     const eligibility = checkPairingEligibility(state.player!, npc);
     if (!eligibility.eligible) {
       showToast(`⚠️ Cannot breed: ${eligibility.reason}`);
+      pairBtn.disabled = false;
       return;
     }
 
     // Check AP cost (costs 3 AP)
-    const currentAP = state.actionPoints ?? 5;
-    if (currentAP < 3) {
+    const currentAPCheck = state.actionPoints ?? 5;
+    if (currentAPCheck < 3) {
       showToast("⚠️ Requires 3 Action Points to breed! End the season to restore energy.");
+      pairBtn.disabled = false;
       return;
     }
 
     // Deduct 3 AP
-    state.actionPoints = currentAP - 3;
+    state.actionPoints = currentAPCheck - 3;
 
     // Generate offspring!
     const child = generateOffspring(state.player!, npc);
@@ -2234,7 +2311,16 @@ function createNpcDetailView(): HTMLElement {
   giftsConfig.forEach(gift => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "w-full text-left p-2.5 bg-slate-900/60 hover:bg-slate-900 border border-slate-750 hover:border-amber-500/50 rounded-xl text-xs text-slate-300 hover:text-white transition-all flex items-center justify-between gap-3 group";
+    const giftAffordable = currentAP >= 1;
+
+    btn.className = `w-full text-left p-2.5 border rounded-xl text-xs transition-all flex items-center justify-between gap-3 group ${
+      giftAffordable
+        ? "bg-slate-900/60 hover:bg-slate-900 border-slate-750 hover:border-amber-500/50 text-slate-300 hover:text-white cursor-pointer focus:ring-2 focus:ring-amber-500"
+        : "bg-slate-800/40 border-slate-850 text-slate-500 cursor-not-allowed opacity-50"
+    }`;
+    if (!giftAffordable) {
+      btn.disabled = true;
+    }
 
     const hasMatch = gift.isMatch(npc);
 
@@ -2252,9 +2338,13 @@ function createNpcDetailView(): HTMLElement {
     `;
 
     btn.addEventListener("click", () => {
-      const currentAP = state.actionPoints ?? 5;
-      if (currentAP <= 0) {
+      if (btn.disabled && giftAffordable) return; // ignore duplicate clicks but allow initial disable
+      btn.disabled = true;
+
+      const currentAPCheck = state.actionPoints ?? 5;
+      if (currentAPCheck <= 0) {
         showToast("⚠️ Out of Action Points! End the season to restore energy.");
+        btn.disabled = false;
         return;
       }
 
@@ -2754,217 +2844,156 @@ function createNurseryView(): HTMLElement {
     }
   } else if (nurserySubTab === "tree") {
     // 2. BRANCHING FAMILY TREE TAB
-    const treeContainer = document.createElement("div");
-    treeContainer.className = "bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-x-auto overflow-y-auto min-h-[500px]";
+    const outerTreeWrap = document.createElement("div");
+    outerTreeWrap.className = "space-y-6";
 
-    // Connections SVG overlay (underneath row contents)
+    // A. Stress Test Panel Header
+    const stressTesterPanel = document.createElement("div");
+    stressTesterPanel.className = "bg-slate-800 border border-slate-700 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-lg";
+    stressTesterPanel.innerHTML = `
+      <div class="text-left space-y-1">
+        <h4 class="text-xs font-black uppercase text-amber-400 tracking-wider">🔬 Family Tree Stress-Tester Tool</h4>
+        <p class="text-[11px] text-slate-300">Click a scenario below to populate deterministic mock cases and stress-test coordinates instantly.</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button id="stress-harem-btn" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-950 text-slate-200 border border-slate-700 hover:border-pink-500 rounded-lg text-xs font-bold transition-all">Harem Case (4+ Partners)</button>
+        <button id="stress-deep-btn" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-950 text-slate-200 border border-slate-700 hover:border-pink-500 rounded-lg text-xs font-bold transition-all">Deep Case (5+ Vert Gens)</button>
+        <button id="stress-web-btn" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-950 text-slate-200 border border-slate-700 hover:border-pink-500 rounded-lg text-xs font-bold transition-all">The Web (Branch Merging)</button>
+        ${activeStressTestType ? `<button id="stress-clear-btn" class="px-3 py-1.5 bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 rounded-lg text-xs font-black transition-all">Clear Stress State</button>` : ""}
+      </div>
+    `;
+
+    outerTreeWrap.appendChild(stressTesterPanel);
+
+    // Bind stress test events
+    setTimeout(() => {
+      document.getElementById("stress-harem-btn")?.addEventListener("click", () => {
+        activeStressTestType = "harem";
+        renderApp();
+      });
+      document.getElementById("stress-deep-btn")?.addEventListener("click", () => {
+        activeStressTestType = "deep";
+        renderApp();
+      });
+      document.getElementById("stress-web-btn")?.addEventListener("click", () => {
+        activeStressTestType = "web";
+        renderApp();
+      });
+      document.getElementById("stress-clear-btn")?.addEventListener("click", () => {
+        activeStressTestType = null;
+        renderApp();
+      });
+    }, 10);
+
+    // B. Build tree members either from active stress test mocks OR genuine game state
+    let displayMembers: Character[] = [];
+    if (activeStressTestType) {
+      displayMembers = generateStressTestMock(activeStressTestType);
+    } else {
+      const treeMembersSet = new Set<Character>();
+      allChars.forEach(c => {
+        if (c.id === "player" || c.isPC || c.isFormerPC) {
+          treeMembersSet.add(c);
+        }
+      });
+      allChars.forEach(c => {
+        if (c.parentIds) {
+          treeMembersSet.add(c);
+          c.parentIds.forEach(pid => {
+            const parentChar = allChars.find(x => x.id === pid);
+            if (parentChar) {
+              treeMembersSet.add(parentChar);
+            }
+          });
+        }
+      });
+      displayMembers = Array.from(treeMembersSet);
+    }
+
+    const treeContainer = document.createElement("div");
+    treeContainer.className = "bg-slate-950 border border-slate-800 rounded-3xl p-6 relative overflow-x-auto overflow-y-auto min-h-[500px]";
+
     const svgConnections = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svgConnections.id = "tree-svg-connections";
     svgConnections.setAttribute("class", "absolute inset-0 pointer-events-none w-full h-full z-0");
     treeContainer.appendChild(svgConnections);
 
-    // Build the robust family tree members set (includes past/present PCs, offspring, and both parents)
-    const treeMembersSet = new Set<Character>();
-    allChars.forEach(c => {
-      if (c.id === "player" || c.isPC || c.isFormerPC) {
-        treeMembersSet.add(c);
-      }
-    });
+    const layoutResult: TreeLayoutResult = computeTreeLayout(displayMembers, activeStressTestType ? displayMembers : allChars);
 
-    allChars.forEach(c => {
-      if (c.parentIds) {
-        treeMembersSet.add(c);
-        c.parentIds.forEach(pid => {
-          const parentChar = allChars.find(x => x.id === pid);
-          if (parentChar) {
-            treeMembersSet.add(parentChar);
-          }
-        });
-      }
-    });
-
-    const treeMembers = Array.from(treeMembersSet);
-    const treeMemberIds = new Set(treeMembers.map(m => m.id));
-
-    // Group characters by generation
-    const genMap: Record<number, Character[]> = {};
-    treeMembers.forEach(c => {
-      const g = c.generation || 1;
-      if (!genMap[g]) genMap[g] = [];
-      genMap[g].push(c);
-    });
-
-    const generations = Object.keys(genMap).map(Number).sort((a, b) => a - b);
-
-    if (generations.length === 0) {
-      treeContainer.innerHTML = `<p class="text-center text-slate-500 py-12">No lineage members recorded.</p>`;
+    if (displayMembers.length === 0) {
+      treeContainer.innerHTML = `<p class="text-center text-slate-500 py-12">No lineage members recorded in this active save state.</p>`;
     } else {
       const rowsBox = document.createElement("div");
-      rowsBox.className = "space-y-24 relative z-10 flex flex-col w-max min-w-full p-8";
+      rowsBox.style.position = "relative";
+      rowsBox.style.width = `${layoutResult.width}px`;
+      rowsBox.style.height = `${layoutResult.height}px`;
+      rowsBox.className = "z-10";
 
-      generations.forEach(gen => {
-        const tier = document.createElement("div");
-        tier.className = "flex flex-col items-center border-b border-slate-800/30 last:border-b-0 pb-8 last:pb-0";
+      // Render absolutely positioned nodes
+      displayMembers.forEach(c => {
+        const coord = layoutResult.coords[c.id];
+        if (!coord) return;
 
-        const rowLabel = document.createElement("div");
-        rowLabel.className = "text-center text-[11px] font-black uppercase text-pink-400/80 tracking-widest mb-4 sticky left-8 w-max";
-        rowLabel.innerText = `Generation ${gen}`;
-        tier.appendChild(rowLabel);
+        const card = document.createElement("div");
+        card.setAttribute("data-id", c.id);
+        card.className = "tree-node-card bg-slate-800/90 hover:bg-slate-800 border border-slate-700 rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer shadow-md select-none w-[220px] h-[80px]";
+        card.style.position = "absolute";
+        card.style.left = `${coord.x}px`;
+        card.style.top = `${coord.y}px`;
 
-        const row = document.createElement("div");
-        row.className = "flex flex-nowrap items-center justify-center gap-16 md:gap-24 py-2";
-        tier.appendChild(row);
+        if (c.id === "player") {
+          card.classList.add("ring-2", "ring-amber-500", "border-amber-400");
+        }
 
-        const charsInRow = genMap[gen];
-
-        // Build partnership graph for characters in this generation row
-        const adj: Record<string, Set<string>> = {};
-        charsInRow.forEach(c => adj[c.id] = new Set());
-
-        allChars.forEach(o => {
-          if (o.parentIds && o.parentIds.length === 2) {
-            const [p1, p2] = o.parentIds;
-            if (adj[p1] && adj[p2]) {
-              adj[p1].add(p2);
-              adj[p2].add(p1);
-            }
+        card.addEventListener("click", () => {
+          if (activeStressTestType) {
+            showToast(`Selected Stress-Test character: **${c.name}** (${c.species})`);
+            return;
           }
-        });
-
-        // Connected components (Partner Clusters)
-        const visited = new Set<string>();
-        const clusters: Character[][] = [];
-
-        // First, extract partner groups
-        charsInRow.forEach(c => {
-          if (visited.has(c.id) || adj[c.id].size === 0) return;
-
-          const component: string[] = [];
-          const dfs = (nodeId: string) => {
-            visited.add(nodeId);
-            component.push(nodeId);
-            const neighbors = Array.from(adj[nodeId]).sort((a, b) => adj[a].size - adj[b].size);
-            neighbors.forEach(nbr => {
-              if (!visited.has(nbr)) {
-                dfs(nbr);
-              }
-            });
-          };
-
-          // Try to start from an endpoint of the partnership graph (degree 1)
-          let startId = c.id;
-          const nodesInComp = [c.id];
-          const tempVisited = new Set<string>([c.id]);
-          const queue = [c.id];
-          while (queue.length > 0) {
-            const curr = queue.shift()!;
-            adj[curr].forEach(nbr => {
-              if (!tempVisited.has(nbr)) {
-                tempVisited.add(nbr);
-                nodesInComp.push(nbr);
-                queue.push(nbr);
-              }
-            });
-          }
-
-          const deg1 = nodesInComp.find(nid => adj[nid].size === 1);
-          if (deg1) {
-            startId = deg1;
-          }
-
-          dfs(startId);
-
-          const clusterChars = component.map(id => charsInRow.find(x => x.id === id)!);
-          clusters.push(clusterChars);
-        });
-
-        // Next, group single characters
-        const singleChars = charsInRow.filter(c => adj[c.id].size === 0);
-        const siblingGroups: Record<string, Character[]> = {};
-
-        singleChars.forEach(c => {
-          const pKey = c.parentIds ? [...c.parentIds].sort().join("___") : "none";
-          if (!siblingGroups[pKey]) {
-            siblingGroups[pKey] = [];
-          }
-          siblingGroups[pKey].push(c);
-        });
-
-        Object.entries(siblingGroups).forEach(([pKey, sList]) => {
-          if (pKey === "none") {
-            sList.forEach(sc => {
-              clusters.push([sc]);
-            });
+          if (c.origin === "offspring") {
+            detailedChildId = c.id;
           } else {
-            clusters.push(sList);
+            selectedNpcId = c.id;
+            activeView = "npc-detail";
+          }
+          renderApp();
+        });
+
+        card.addEventListener("mouseenter", () => {
+          if (typeof (window as any).drawTreeConnections === "function") {
+            (window as any).drawTreeConnections(c.id);
+          }
+        });
+        card.addEventListener("mouseleave", () => {
+          if (typeof (window as any).drawTreeConnections === "function") {
+            (window as any).drawTreeConnections(null);
           }
         });
 
-        // Create the layout for each cluster in the row
-        clusters.forEach(cluster => {
-          const clusterDiv = document.createElement("div");
-          clusterDiv.className = "flex flex-nowrap gap-4 items-center justify-center";
+        // 45px small render
+        const av = document.createElement("div");
+        av.className = "flex-shrink-0";
+        av.innerHTML = renderCharacter(c, 45, "portrait");
+        card.appendChild(av);
 
-          cluster.forEach(c => {
-            const card = document.createElement("div");
-            card.setAttribute("data-id", c.id);
-            card.className = "tree-node-card bg-slate-800/90 hover:bg-slate-800 border border-slate-700 rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer shadow-md select-none max-w-xs";
-            if (c.id === "player") {
-              card.classList.add("ring-2", "ring-amber-500", "border-amber-400");
-            }
+        const textEl = document.createElement("div");
+        textEl.className = "text-left min-w-0";
 
-            card.addEventListener("click", () => {
-              if (c.origin === "offspring") {
-                detailedChildId = c.id;
-              } else {
-                selectedNpcId = c.id;
-                activeView = "npc-detail";
-              }
-              renderApp();
-            });
+        const ageVal = c.age ?? 3;
+        const stageLabel = getAgeStageLabel(ageVal);
+        const stageColor = stageLabel === "Youth" ? "text-cyan-400" : stageLabel === "Prime" ? "text-emerald-400" : "text-amber-500";
 
-            // Card Hover Path Highlighting registration
-            card.addEventListener("mouseenter", () => {
-              if (typeof (window as any).drawTreeConnections === "function") {
-                (window as any).drawTreeConnections(c.id);
-              }
-            });
-            card.addEventListener("mouseleave", () => {
-              if (typeof (window as any).drawTreeConnections === "function") {
-                (window as any).drawTreeConnections(null);
-              }
-            });
-
-            // Small 45px portrait
-            const av = document.createElement("div");
-            av.className = "flex-shrink-0";
-            av.innerHTML = renderCharacter(c, 45, "portrait");
-            card.appendChild(av);
-
-            const textEl = document.createElement("div");
-            textEl.className = "text-left min-w-0";
-
-            const ageVal = c.age ?? 3;
-            const stageLabel = getAgeStageLabel(ageVal);
-            const stageColor = stageLabel === "Youth" ? "text-cyan-400" : stageLabel === "Prime" ? "text-emerald-400" : "text-amber-500";
-
-            textEl.innerHTML = `
-              <div class="font-extrabold text-slate-100 text-xs truncate flex items-center gap-1">${c.id === "player" ? "👑 " : ""}${c.name}</div>
-              <p class="text-[9px] text-slate-400 mt-0.5">${c.species} • <span class="${stageColor} font-bold">${stageLabel}</span></p>
-            `;
-            card.appendChild(textEl);
-            clusterDiv.appendChild(card);
-          });
-
-          row.appendChild(clusterDiv);
-        });
-
-        rowsBox.appendChild(tier);
+        textEl.innerHTML = `
+          <div class="font-extrabold text-slate-100 text-xs truncate flex items-center gap-1">${c.id === "player" ? "👑 " : ""}${c.name}</div>
+          <p class="text-[9px] text-slate-400 mt-0.5">${c.species} • <span class="${stageColor} font-bold">${stageLabel}</span></p>
+        `;
+        card.appendChild(textEl);
+        rowsBox.appendChild(card);
       });
 
       treeContainer.appendChild(rowsBox);
 
-      // SVG dynamic connection drawing with centered horizontal partner routing
+      // SVG dynamic connection drawing with orthogonal paths
       setTimeout(() => {
         let currentHoveredId: string | null = null;
 
@@ -2972,45 +3001,36 @@ function createNurseryView(): HTMLElement {
           currentHoveredId = hoveredId;
           const svg = document.getElementById("tree-svg-connections") as SVGSVGElement | null;
           if (!svg) return;
-          svg.innerHTML = ""; // clear previous connections
+          svg.innerHTML = ""; // clear connections
 
-          // Size SVG canvas to match full scrollable area
-          svg.setAttribute("width", treeContainer.scrollWidth.toString());
-          svg.setAttribute("height", treeContainer.scrollHeight.toString());
-
-          const containerRect = treeContainer.getBoundingClientRect();
-          const scrollLeft = treeContainer.scrollLeft;
-          const scrollTop = treeContainer.scrollTop;
+          svg.setAttribute("width", layoutResult.width.toString());
+          svg.setAttribute("height", layoutResult.height.toString());
 
           const processedPairs = new Set<string>();
 
-          allChars.forEach(child => {
+          displayMembers.forEach(child => {
             if (!child.parentIds) return;
-            if (!treeMemberIds.has(child.id)) return;
 
-            const childCard = treeContainer.querySelector(`[data-id="${child.id}"].tree-node-card`);
-            if (!childCard) return;
+            const childCoord = layoutResult.coords[child.id];
+            if (!childCoord) return;
 
-            const childRect = childCard.getBoundingClientRect();
-            const childX = childRect.left + childRect.width / 2 - containerRect.left + scrollLeft;
-            const childY = childRect.top - containerRect.top + scrollTop;
+            // Center points of cards
+            const childX = childCoord.x + 110; // card width is 220
+            const childY = childCoord.y;
 
-            const parentIds = child.parentIds.filter(pid => treeMemberIds.has(pid));
+            const parentIds = child.parentIds.filter(pid => !!layoutResult.coords[pid]);
 
             if (parentIds.length === 2) {
               const [pAId, pBId] = parentIds;
-              const pACard = treeContainer.querySelector(`[data-id="${pAId}"].tree-node-card`);
-              const pBCard = treeContainer.querySelector(`[data-id="${pBId}"].tree-node-card`);
+              const pACoord = layoutResult.coords[pAId];
+              const pBCoord = layoutResult.coords[pBId];
 
-              if (pACard && pBCard) {
-                const pARect = pACard.getBoundingClientRect();
-                const pBRect = pBCard.getBoundingClientRect();
+              if (pACoord && pBCoord) {
+                const pAX = pACoord.x + 110;
+                const pAY_bottom = pACoord.y + 80; // card height is 80
 
-                const pAX = pARect.left + pARect.width / 2 - containerRect.left + scrollLeft;
-                const pAY_bottom = pARect.top + pARect.height - containerRect.top + scrollTop;
-
-                const pBX = pBRect.left + pBRect.width / 2 - containerRect.left + scrollLeft;
-                const pBY_bottom = pBRect.top + pBRect.height - containerRect.top + scrollTop;
+                const pBX = pBCoord.x + 110;
+                const pBY_bottom = pBCoord.y + 80;
 
                 const bottomY = (pAY_bottom + pBY_bottom) / 2;
                 const midX = (pAX + pBX) / 2;
@@ -3018,7 +3038,6 @@ function createNurseryView(): HTMLElement {
 
                 const midWayY = (midY + childY) / 2;
 
-                // Determine highlight states
                 const isChildHovered = hoveredId === child.id;
                 const isParentAHovered = hoveredId === pAId;
                 const isParentBHovered = hoveredId === pBId;
@@ -3032,7 +3051,6 @@ function createNurseryView(): HTMLElement {
                 if (!processedPairs.has(pairKey)) {
                   processedPairs.add(pairKey);
 
-                  // Draw horizontal line connecting partners
                   const hLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
                   hLine.setAttribute("x1", pAX.toString());
                   hLine.setAttribute("y1", bottomY.toString());
@@ -3044,7 +3062,6 @@ function createNurseryView(): HTMLElement {
                   svg.appendChild(hLine);
                 }
 
-                // Route descendant line downwards from center point (midX, midY) of the horizontal line
                 // Orthogonal "Elbow" routing: midX,midY -> midX,midWayY -> childX,midWayY -> childX,childY
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 const d = `M ${midX} ${midY} L ${midX} ${midWayY} L ${childX} ${midWayY} L ${childX} ${childY}`;
@@ -3058,14 +3075,13 @@ function createNurseryView(): HTMLElement {
               }
             }
 
-            // Fallback if 1 parent or cards missing
+            // Fallback for 1 parent or missing cords
             parentIds.forEach(parentId => {
-              const parentCard = treeContainer.querySelector(`[data-id="${parentId}"].tree-node-card`);
-              if (!parentCard) return;
+              const parentCoord = layoutResult.coords[parentId];
+              if (!parentCoord) return;
 
-              const parentRect = parentCard.getBoundingClientRect();
-              const parentX = parentRect.left + parentRect.width / 2 - containerRect.left + scrollLeft;
-              const parentY = parentRect.top + parentRect.height - containerRect.top + scrollTop;
+              const parentX = parentCoord.x + 110;
+              const parentY = parentCoord.y + 80;
 
               const midWayY = (parentY + childY) / 2;
 
@@ -3097,7 +3113,8 @@ function createNurseryView(): HTMLElement {
       }, 100);
     }
 
-    container.appendChild(treeContainer);
+    outerTreeWrap.appendChild(treeContainer);
+    container.appendChild(outerTreeWrap);
   } else if (nurserySubTab === "pairing") {
     // 3. LINEAGE PAIRING CHAMBER TAB
     const chamber = document.createElement("div");
@@ -3199,12 +3216,27 @@ function createNurseryView(): HTMLElement {
         `;
 
         const breedBtn = document.createElement("button");
-        breedBtn.className = "w-full py-3 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-extrabold rounded-xl text-xs shadow-lg transition-all cursor-pointer uppercase";
+        const currentAPVal = state.actionPoints ?? 5;
+        const breedingAffordable = currentAPVal >= 3;
+
+        breedBtn.className = `w-full py-3 font-extrabold rounded-xl text-xs shadow-lg transition-all uppercase ${
+          breedingAffordable
+            ? "bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white cursor-pointer focus:ring-2 focus:ring-pink-500"
+            : "bg-slate-700 text-slate-400 cursor-not-allowed opacity-50"
+        }`;
+        if (!breedingAffordable) {
+          breedBtn.disabled = true;
+        }
+
         breedBtn.innerText = "✨ Breed Selected Partners (Costs 3 AP)";
         breedBtn.addEventListener("click", () => {
+          if (breedBtn.disabled && breedingAffordable) return;
+          breedBtn.disabled = true;
+
           const currentAP = state.actionPoints ?? 5;
           if (currentAP < 3) {
             showToast("⚠️ Requires 3 Action Points to breed! End the season to restore energy.");
+            breedBtn.disabled = false;
             return;
           }
 
@@ -3491,6 +3523,8 @@ function createExpeditionsView(): HTMLElement {
 
     embarkBtn.addEventListener("click", () => {
       if (!canEmbark) return;
+      if (embarkBtn.disabled) return;
+      embarkBtn.disabled = true;
 
       // Deduct 2 AP
       state.actionPoints = currentAP - 2;
