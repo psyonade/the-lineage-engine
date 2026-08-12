@@ -31,12 +31,12 @@ export function isRestrictedFamily(charA: Character, charB: Character): boolean 
   if (charA.parentIds && charA.parentIds.includes(charB.id)) return true;
   if (charB.parentIds && charB.parentIds.includes(charA.id)) return true;
 
-  // Sibling restriction (share the same parents)
+  // Sibling / Half-Sibling restriction (share at least one parent)
   if (charA.parentIds && charB.parentIds) {
     const [pA1, pA2] = charA.parentIds;
     const [pB1, pB2] = charB.parentIds;
-    const shareBoth = (pA1 === pB1 && pA2 === pB2) || (pA1 === pB2 && pA2 === pB1);
-    if (shareBoth) return true;
+    const shareAny = pA1 === pB1 || pA1 === pB2 || pA2 === pB1 || pA2 === pB2;
+    if (shareAny) return true;
   }
 
   return false;
@@ -61,7 +61,7 @@ export function checkPairingEligibility(charA: Character, charB: Character): { e
   }
 
   if (isRestrictedFamily(charA, charB)) {
-    return { eligible: false, reason: "Direct parent-child and full-sibling pairings are forbidden." };
+    return { eligible: false, reason: "Direct parent-child, full-sibling, and half-sibling pairings are forbidden." };
   }
 
   return { eligible: true };
